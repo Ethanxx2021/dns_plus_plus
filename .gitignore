@@ -3,7 +3,8 @@ udp_server
 dns_node
 raii_test
 dns_header_test
-
+dns_server_v1
+dns_server_v2
 # 忽略 C/C++ 编译产生的中间文件
 *.o
 *.out
