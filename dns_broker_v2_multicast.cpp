@@ -5,12 +5,12 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <unordered_map>
-#include <vector> // 引入 vector
+#include <vector>
+#include <ctime>  // 添加 time 头文件
 
-// 协议头定义（与昨天一致）
 #pragma pack(1)
 struct PubSubMsg {
-    uint16_t msg_type; // 1: Subscribe, 2: Publish
+    uint16_t msg_type; // 1: Subscribe, 2: Publish, 3: Heartbeat
     uint16_t topic_id;
     char payload[8];
 };
@@ -19,8 +19,9 @@ struct PubSubMsg {
 class DnsMulticastBroker {
 private:
     int server_fd;
-    // 🌟 核心升级：路由表现在存储的是“订阅者列表”！
     std::unordered_map<uint16_t, std::vector<struct sockaddr_in>> topic_table;
+    // 🌟 新增：记录每个 Topic 的最后活跃时间（秒级时间戳）
+    std::unordered_map<uint16_t, time_t> topic_last_active;
 
 public:
     DnsMulticastBroker(uint16_t port) {
@@ -30,7 +31,6 @@ public:
         server_addr.sin_family = AF_INET;
         server_addr.sin_addr.s_addr = INADDR_ANY;
         server_addr.sin_port = htons(port);
-
         bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
         std::cout << "[DNS++ Multicast Broker] Listening on port " << port << std::endl;
     }
@@ -41,46 +41,66 @@ public:
         char buffer[1024];
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
+        // 静态变量用于控制清理周期
+        static time_t last_check = time(nullptr);
 
         while (true) {
             memset(buffer, 0, sizeof(buffer));
-            int bytes = recvfrom(server_fd, buffer, sizeof(buffer), 0, 
+            int bytes = recvfrom(server_fd, buffer, sizeof(buffer), 0,
                                  (struct sockaddr*)&client_addr, &client_len);
-            
+
             if (bytes >= sizeof(PubSubMsg)) {
                 PubSubMsg* msg = (PubSubMsg*)buffer;
                 uint16_t type = ntohs(msg->msg_type);
                 uint16_t topic = ntohs(msg->topic_id);
 
-                // 处理订阅
+                // ---------- 处理订阅 (1) ----------
                 if (type == 1) {
-                    // 把客户地址加入对应 topic 的 vector 中
                     topic_table[topic].push_back(client_addr);
-                    
+                    topic_last_active[topic] = time(nullptr); // 记录订阅时间
                     char* ip = inet_ntoa(client_addr.sin_addr);
                     uint16_t port = ntohs(client_addr.sin_port);
                     std::cout << "[Subscribe] Client " << ip << ":" << port
-                              << " joined Topic " << topic 
+                              << " joined Topic " << topic
                               << " (Total subscribers: " << topic_table[topic].size() << ")" << std::endl;
                 }
-                // 处理发布
+                // ---------- 处理发布 (2) ----------
                 else if (type == 2) {
                     std::cout << "[Publish] Data for Topic " << topic << std::endl;
-
-                    // 查找是否有订阅者
                     if (topic_table.find(topic) != topic_table.end()) {
-                        auto& subscribers = topic_table[topic]; // 获取订阅者列表
-
-                        // 遍历所有订阅者，逐一转发！
+                        auto& subscribers = topic_table[topic];
                         for (const auto& sub : subscribers) {
-                            sendto(server_fd, buffer, bytes, 0, 
+                            sendto(server_fd, buffer, bytes, 0,
                                    (struct sockaddr*)&sub, sizeof(sub));
                         }
-                        std::cout << "   -> Multcast to " << subscribers.size() 
+                        // 更新发布活跃时间
+                        topic_last_active[topic] = time(nullptr);
+                        std::cout << "   -> Multcast to " << subscribers.size()
                                   << " subscribers." << std::endl;
                     } else {
                         std::cout << "   -> No subscribers for this topic." << std::endl;
                     }
+                }
+                // ---------- 处理心跳 (3) ----------
+                else if (type == 3) {
+                    topic_last_active[topic] = time(nullptr);
+                    std::cout << "[Heartbeat] Topic " << topic << " is alive." << std::endl;
+                }
+
+                // ---------- 定期清理过期 Topic（每 10 秒扫描一次） ----------
+                if (time(nullptr) - last_check > 10) {
+                    for (auto it = topic_table.begin(); it != topic_table.end(); ) {
+                        // 如果超过 15 秒未活跃，则删除该 Topic
+                        if (time(nullptr) - topic_last_active[it->first] > 15) {
+                            std::cout << "[Cleanup] Topic " << it->first
+                                      << " expired, removed." << std::endl;
+                            topic_last_active.erase(it->first);  // 同时删除活跃时间记录
+                            it = topic_table.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                    last_check = time(nullptr);
                 }
             }
         }
