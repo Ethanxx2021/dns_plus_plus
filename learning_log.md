@@ -72,3 +72,21 @@
 ### 💻 代码实战记录
 - 编写 `dns_server_v2.cpp`，成功解析了 12 字节的 DNS 头部。
 - 掌握了使用 `printf '\x12\x34...' | nc -u` 模拟发送底层二进制数据包的黑客调试技巧。
+---
+## 📅 5月5日：代理的觉醒 (Pub/Sub 路由转发)
+
+### 🎯 今日目标
+- [x] 掌握 `std::unordered_map`，实现内存路由表。
+- [x] 掌握快慢指针思想（LeetCode 141 环形链表）。
+- [x] 实现 DNS++ Broker 的核心逻辑：订阅记录与消息转发。
+
+### 🧠 核心知识点沉淀
+1. **快慢指针 (Fast & Slow Pointers)**：解决链表环问题的最优解。想象操场跑步，快跑者（走2步）必然会在环内套圈追上慢跑者（走1步）。
+2. **Pub/Sub 架构底层原理**：
+   - **Subscribe (订阅)**：Broker 收到请求后，将 `Topic ID` 作为 Key，客户端的 `sockaddr_in` 作为 Value，存入 `unordered_map`。
+   - **Publish (发布)**：Broker 收到数据后，以 `Topic ID` 去 map 中 `find()`。若找到，则调用 `sendto()` 将数据精准转发给对应的客户端。
+3. **内存对齐指令**：使用 `#pragma pack(1)` 强制结构体按 1 字节对齐，防止编译器自动填充空白字节，确保网络二进制解析的绝对精准。
+
+### 💻 代码实战记录
+- 编写 `dns_broker_v1.cpp`，成功实现了基于 UDP 的发布/订阅中间件。
+- 开启 3 个终端，成功模拟了 Client A 订阅、Client B 发布、Broker 成功路由转发的全过程。
