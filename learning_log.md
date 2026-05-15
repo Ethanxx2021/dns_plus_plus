@@ -138,3 +138,15 @@
 
 ### 💻 代码实战记录
 - 重构 `dns_broker_v4_refactor.cpp`，所有日志输出改为 `stringstream` 统一管理。
+---
+## 📅 5月9日：多线程日志
+
+### 🎯 今日目标
+- [x] 掌握 `std::thread`、`join`、`detach`、互斥锁概念。
+- [x] 用双栈实现队列（LeetCode 232）。
+- [x] 重构 Broker 使用后台线程处理日志。
+
+### 🧠 核心知识点沉淀
+1. **多线程启蒙**：主线程处理网络 I/O，后台线程（Logger）处理耗时操作（日志输出），实现并发。
+2. **生产者-消费者模型**：主线程生产日志字符串（pushLog），消费者线程（Logger::process）取出并打印。通过 `std::mutex` 和 `std::condition_variable` 实现安全通信。
+3. **双栈模拟队列**：入队全压入 inStack，出队时若 outStack 为空，将 inStack 元素全部弹出压入 outStack，即可实现 FIFO。均摊 O(1)。
