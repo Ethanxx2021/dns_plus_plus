@@ -126,7 +126,7 @@ This thesis provides the **first real‑system C++ implementation and empirical 
 
 ## 📧 Contact
 
-Shangqing Xu – [ethanxx2021@163.com]
+Shangqing Xu – ethanxx2021@163.com
 Project link: [https://github.com/Ethanxx2021/dns_plus_plus](https://github.com/Ethanxx2021/dns_plus_plus)
 
 ---
