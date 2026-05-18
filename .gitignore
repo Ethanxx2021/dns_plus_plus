@@ -14,3 +14,4 @@ dns_server_v2
 echo "build/" >> .gitignorebuild/
 raii_test
 udp_server
+build/

@@ -1,3 +1,0 @@
-/home/ethan/projects/dns_plus_plus/build/CMakeFiles/dns_broker.dir
-/home/ethan/projects/dns_plus_plus/build/CMakeFiles/edit_cache.dir
-/home/ethan/projects/dns_plus_plus/build/CMakeFiles/rebuild_cache.dir
