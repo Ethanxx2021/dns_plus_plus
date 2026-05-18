@@ -4,8 +4,6 @@
 **Student:** Shangqing Xu | **Supervisor:** Professor Miguel Rio
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![C++11](https://img.shields.io/badge/C%2B%2B-11-blue)]()
-[![Platform](https://img.shields.io/badge/platform-Linux-x86__64-orange)]()
 
 ---
 
