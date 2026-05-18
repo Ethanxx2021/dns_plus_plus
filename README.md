@@ -131,4 +131,8 @@ Project link: [https://github.com/Ethanxx2021/dns_plus_plus](https://github.com/
 
 ---
 
+<<<<<<< Updated upstream
 *Last updated: May 2025*
+=======
+*Last updated: May 2025*
+>>>>>>> Stashed changes
