@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/dns_broker.dir/src/main.cpp.o CMakeFiles/dns_broker.dir/src/broker/broker.cpp.o CMakeFiles/dns_broker.dir/src/logger/logger.cpp.o -o dns_broker  -lpthread 
