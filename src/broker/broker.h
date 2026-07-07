@@ -14,6 +14,7 @@ struct GeoClient {
     struct sockaddr_in addr;   // 网络地址
     float lat;                // 纬度
     float lon;                // 经度
+    int brake_limit = 2;
 };
 
 class DnsMulticastBroker {
@@ -24,7 +25,9 @@ public:
 
 private:
     int server_fd;
-
+    int brake_limit;
+    // 对于每个 topic，记录每个象限的发布计数，用于 Brake
+    std::unordered_map<uint16_t, std::unordered_map<int, int>> quadrant_count;
     // ---------- 旧协议路由表 (无坐标) ----------
     std::unordered_map<uint16_t, std::vector<struct sockaddr_in>> topic_table;
     std::unordered_map<uint16_t, time_t> topic_last_active;

@@ -6,6 +6,9 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <cmath>        // sqrt (可选，这里只用了平方比较)
+#include <sys/epoll.h>
+#include <errno.h>
+#define MAX_EVENTS 10
 
 // ---------- 构造 / 析构 ----------
 
@@ -174,50 +177,76 @@ void DnsMulticastBroker::handleGeoPublish(uint16_t topic,
 // ---------- 主循环 ----------
 
 void DnsMulticastBroker::start() {
+    // 创建 epoll 实例
+    int epoll_fd = epoll_create1(0);
+    if (epoll_fd < 0) {
+        std::cerr << "epoll_create1 failed" << std::endl;
+        return;
+    }
+
+    // 向 epoll 注册 server_fd，监听可读事件
+    struct epoll_event ev;
+    ev.events = EPOLLIN;         // 有数据可读时通知
+    ev.data.fd = server_fd;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) < 0) {
+        std::cerr << "epoll_ctl failed" << std::endl;
+        close(epoll_fd);
+        return;
+    }
+
+    struct epoll_event events[MAX_EVENTS];  // MAX_EVENTS 可定义为 10
     char buffer[1024];
     struct sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
     time_t last_cleanup = time(nullptr);
 
     while (true) {
-        memset(buffer, 0, sizeof(buffer));
-        int bytes = recvfrom(server_fd, buffer, sizeof(buffer), 0,
-                             (struct sockaddr*)&client_addr, &client_len);
+        // 等待事件，超时 3000 毫秒（3秒）
+        int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, 3000);
+        if (nfds < 0) {
+            if (errno == EINTR) continue;  // 被信号中断，重试
+            break;
+        }
 
-        // ---------- 协议识别与分发 ----------
-        if (bytes == sizeof(DnsPlusMsg)) {
-            // 新协议 (20 字节)
-            const DnsPlusMsg* geo = reinterpret_cast<const DnsPlusMsg*>(buffer);
-            uint16_t type  = ntohs(geo->msg_type);
-            uint16_t topic = ntohs(geo->topic_id);
-            float lat = geo->lat;
-            float lon = geo->lon;
-
-            switch (type) {
-                case 1: handleGeoSubscribe(topic, client_addr, lat, lon); break;
-                case 2: handleGeoPublish(topic, buffer, bytes, lat, lon); break;
-                case 3: handleHeartbeat(topic); break;
+        // 处理所有就绪的事件
+        for (int i = 0; i < nfds; ++i) {
+            if (events[i].data.fd == server_fd) {
+                // UDP 可读，可能有多条数据报（但 UDP 一次 epoll 通常对应一个包）
+                // 循环读取直到 EAGAIN（如果设为非阻塞），这里我们保守一次读一个
+                int bytes = recvfrom(server_fd, buffer, sizeof(buffer), 0,
+                                     (struct sockaddr*)&client_addr, &client_len);
+                if (bytes > 0) {
+                    // --- 协议分发（与之前完全一样） ---
+                    if (bytes == sizeof(DnsPlusMsg)) {
+                        const DnsPlusMsg* geo = reinterpret_cast<const DnsPlusMsg*>(buffer);
+                        uint16_t type  = ntohs(geo->msg_type);
+                        uint16_t topic = ntohs(geo->topic_id);
+                        switch (type) {
+                            case 1: handleGeoSubscribe(topic, client_addr, geo->lat, geo->lon); break;
+                            case 2: handleGeoPublish(topic, buffer, bytes, geo->lat, geo->lon); break;
+                            case 3: handleHeartbeat(topic); break;
+                        }
+                    } else if (bytes >= sizeof(PubSubMsg)) {
+                        const PubSubMsg* msg = reinterpret_cast<const PubSubMsg*>(buffer);
+                        uint16_t type  = ntohs(msg->msg_type);
+                        uint16_t topic = ntohs(msg->topic_id);
+                        switch (type) {
+                            case 1: handleSubscribe(topic, client_addr); break;
+                            case 2: handlePublish(topic, buffer, bytes); break;
+                            case 3: handleHeartbeat(topic); break;
+                        }
+                    }
+                }
             }
         }
-        else if (bytes >= sizeof(PubSubMsg)) {
-            // 旧协议 (≥12 字节)
-            const PubSubMsg* msg = reinterpret_cast<const PubSubMsg*>(buffer);
-            uint16_t type  = ntohs(msg->msg_type);
-            uint16_t topic = ntohs(msg->topic_id);
 
-            switch (type) {
-                case 1: handleSubscribe(topic, client_addr); break;
-                case 2: handlePublish(topic, buffer, bytes); break;
-                case 3: handleHeartbeat(topic); break;
-            }
-        }
-        // 忽略长度不足的包
-
-        // ---------- 定期清理 ----------
+        // 无论是否有数据，超时后都会执行到这里，定期清理
         time_t now = time(nullptr);
         if (now - last_cleanup > 10) {
             cleanupExpiredTopics();
             last_cleanup = now;
         }
     }
+
+    close(epoll_fd);
 }
