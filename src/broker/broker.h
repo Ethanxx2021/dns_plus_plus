@@ -1,6 +1,6 @@
 #ifndef BROKER_H
 #define BROKER_H
-
+#include <queue>
 #include <netinet/in.h>
 #include <unordered_map>
 #include <vector>
@@ -20,14 +20,19 @@ struct GeoClient {
 class DnsMulticastBroker {
 public:
     explicit DnsMulticastBroker(uint16_t port);
+    explicit DnsMulticastBroker(uint16_t port,
+                               int brake_limit = 2,
+                               time_t brake_window_sec = 10);
     ~DnsMulticastBroker();
     void start();
 
 private:
     int server_fd;
     int brake_limit;
+    time_t brake_window_sec;
     // 对于每个 topic，记录每个象限的发布计数，用于 Brake
-    std::unordered_map<uint16_t, std::unordered_map<int, int>> quadrant_count;
+    std::unordered_map<uint16_t, std::unordered_map<int, std::queue<time_t>>> quadrant_count;
+    int getQuadrant(float lat, float lon) const;
     // ---------- 旧协议路由表 (无坐标) ----------
     std::unordered_map<uint16_t, std::vector<struct sockaddr_in>> topic_table;
     std::unordered_map<uint16_t, time_t> topic_last_active;
