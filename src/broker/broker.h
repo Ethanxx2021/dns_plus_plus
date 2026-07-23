@@ -1,25 +1,39 @@
 #ifndef BROKER_H
 #define BROKER_H
+
 #include <queue>
 #include <netinet/in.h>
 #include <unordered_map>
 #include <vector>
 #include <ctime>
-#include <limits>       // for std::numeric_limits
-#include "protocol/protocol.h"
-#include "logger/logger.h"
+#include <limits>
+#include <optional>
+#include <string>
 
-// 表示一个带坐标的客户端 (订阅者或发布者)
+#include "protocol/TlvMessage.h"
+#include "logger/logger.h"
+#include "utils/geo.h"
+
+// A subscriber with coordinates and per-subscriber closest cache.
+// This implements Algorithm 1's closest[S] state.
 struct GeoClient {
-    struct sockaddr_in addr;   // 网络地址
-    float lat;                // 纬度
-    float lon;                // 经度
-    int brake_limit = 2;
+    struct sockaddr_in addr;
+    float lat;
+    float lon;
+    // Algorithm 1, line 2/8: closest[N_in] / closest[S]
+    // Initialized to infinity — first publication always qualifies.
+    double cached_closest_dist = std::numeric_limits<double>::max();
+};
+
+// A cached publication (for query_mode immediate response)
+struct CachedPub {
+    float lat;
+    float lon;
+    std::vector<uint8_t> raw_message;  // original TLV message bytes
 };
 
 class DnsMulticastBroker {
 public:
-    explicit DnsMulticastBroker(uint16_t port);
     explicit DnsMulticastBroker(uint16_t port,
                                int brake_limit = 2,
                                time_t brake_window_sec = 10);
@@ -30,33 +44,41 @@ private:
     int server_fd;
     int brake_limit;
     time_t brake_window_sec;
-    // 对于每个 topic，记录每个象限的发布计数，用于 Brake
-    std::unordered_map<uint16_t, std::unordered_map<int, std::queue<time_t>>> quadrant_count;
-    int getQuadrant(float lat, float lon) const;
-    // ---------- 旧协议路由表 (无坐标) ----------
-    std::unordered_map<uint16_t, std::vector<struct sockaddr_in>> topic_table;
-    std::unordered_map<uint16_t, time_t> topic_last_active;
-
-    // ---------- 新协议路由表 (带坐标) ----------
-    // 每个 topic 的订阅者列表 (含坐标)
-    std::unordered_map<uint16_t, std::vector<GeoClient>> geo_subscribers;
 
     Logger logger;
 
-    // ---------- 辅助函数 ----------
+    // ---------- Routing Tables ----------
+    // Key is service_name (string, per paper §3.3)
+    // IT[] — Input Table: subscribers per service name
+    std::unordered_map<std::string, std::vector<GeoClient>> subscribers;
+
+    // Cached publications per service name (for query_mode)
+    std::unordered_map<std::string, std::vector<CachedPub>> pub_cache;
+
+    // TTL tracking per service name
+    std::unordered_map<std::string, time_t> last_active;
+
+    // Brake: per service_name, per quadrant, sliding window of timestamps
+    std::unordered_map<std::string,
+                       std::unordered_map<int, std::queue<time_t>>> brake_count;
+
+    // ---------- Helpers ----------
     std::string clientAddrStr(const struct sockaddr_in& addr) const;
+    int getQuadrant(float lat, float lon) const;
 
-    // 旧协议处理
-    void handleSubscribe(uint16_t topic, const struct sockaddr_in& client);
-    void handlePublish(uint16_t topic, const char* buffer, int bytes);
-    void handleHeartbeat(uint16_t topic);
-    void cleanupExpiredTopics();
+    // Check if a publication passes the brake
+    bool brakeAllows(const std::string& service, float lat, float lon);
 
-    // 新协议处理 (带坐标)
-    void handleGeoSubscribe(uint16_t topic, const struct sockaddr_in& client,
-                            float lat, float lon);
-    void handleGeoPublish(uint16_t topic, const char* buffer, int bytes,
-                          float pub_lat, float pub_lon);
+    // ---------- Message Handlers ----------
+    void handleSubscribe(const TlvMessage& msg,
+                         const struct sockaddr_in& client);
+    void handlePublish(const TlvMessage& msg,
+                       const struct sockaddr_in& client);
+    void handleHeartbeat(const TlvMessage& msg,
+                         const struct sockaddr_in& client);
+
+    // ---------- Periodic Maintenance ----------
+    void cleanupExpired();
 };
 
-#endif
+#endif // BROKER_H

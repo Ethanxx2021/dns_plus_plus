@@ -1,17 +1,15 @@
-# 忽略所有编译生成的二进制可执行文件
-udp_server
-dns_node
-raii_test
-dns_header_test
-dns_server_v1
-dns_server_v2
-# 忽略 C/C++ 编译产生的中间文件
+# Build artifacts
+build/
 *.o
 *.out
 
-# 忽略 VSCode 的本地配置文件（如果有的话）
+# Python virtual environment
+venv/
+.venv/
+
+# IDE files
 .vscode/
-echo "build/" >> .gitignorebuild/
-raii_test
-udp_server
-build/
+.idea/
+
+# OS files
+.DS_Store
