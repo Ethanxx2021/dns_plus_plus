@@ -300,4 +300,4 @@ Project link: [https://github.com/Ethanxx2021/dns_plus_plus](https://github.com/
 
 ---
 
-*Last updated: June 2025*
+*Last updated: July 2025*
