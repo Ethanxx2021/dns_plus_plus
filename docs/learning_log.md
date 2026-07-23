@@ -1,152 +1,262 @@
-# 🚀 DNS++ 毕设日志
+# DNS++ Development Log
 
-## 📅 5月1日：DNS++ 启航
-
-### 🎯 今日目标
-- [x] 搭建并验证 Ubuntu + VSCode C++ 开发环境。
-- [x] 掌握 C++ 基础语法（引用与容器）。
-- [x] 确定 DNS++ 底层网络协议选型。
-
-### 🧠 核心知识点沉淀
-1. **网络基础选型**：DNS++ 底层将采用 **UDP (`SOCK_DGRAM`)** 协议，因为真实 DNS 协议默认基于 UDP，具有无连接、低延迟的特性。
-2. **字节序转换**：网络传输必须严格使用**大端序 (Big-Endian)**。发送 16 位整数（如端口号）前，必须调用 `htons()` 函数进行转换。
-3. **算法映射**：LeetCode 206 (反转链表) 的逻辑，完美对应了 DNS 代理节点在递归查询后，数据包**原路回溯**的路径反转过程。
-
-### 💻 代码实战记录
-- 成功编译运行 `dns_node_init.cpp`。
-- 深入理解了 `std::vector` 的遍历以及 `&` 引用在避免内存拷贝中的关键作用。
+A chronological record of technical learning, design decisions, and implementation milestones throughout the project.
 
 ---
 
-## 📅 5月2日
+## Phase 0: Foundation (May 2025)
 
-### 🎯 今日目标
-- [x] 掌握 C++ 结构体与内存大小计算。
-- [x] 跑通第一个 UDP 接收端程序。
+### Day 1 — Project Kickoff & Environment Setup
 
-### 🧠 核心知识点沉淀
-1. **协议头定义**：使用 `struct` 定义了 12 字节的 `DnsHeader`。在网络编程中，必须使用 `uint16_t` 等定长类型，以保证跨平台内存一致性。
-2. **哈希表应用**：掌握了 `std::unordered_map` 的 `find` 和 `end` 用法（LeetCode 1 两数之和）。这是未来实现 **DNS 缓存 (Cache)** 和 **O(1) 路由表查找** 的核心数据结构。
-3. **UDP 接收三步曲**：
-   - `socket()`：向内核申请 UDP 资源。
-   - `bind()`：绑定本地 IP 与端口。
-   - `recvfrom()`：阻塞监听，并记录发送方的 `sockaddr_in` 地址信息。
+**Goals:**
+- Set up Ubuntu + VSCode C++ development environment
+- Learn C++ fundamentals (references, containers)
+- Select DNS++ transport protocol
 
-### 💻 代码实战记录
-- 成功手写 `udp_server.cpp`。
-- 使用 Linux 命令行工具 `nc -u 127.0.0.1 8080` 成功进行了本地回环测试，服务器成功打印出接收到的字符串。
+**Key Learnings:**
+- **Transport selection**: DNS++ uses **UDP (`SOCK_DGRAM`)** — connectionless, low-latency, mirroring real DNS behavior
+- **Byte-order**: All network integers must use **big-endian** via `htons()`/`ntohs()`
+- **Algorithmic thinking**: LeetCode 206 (reverse linked list) maps directly to DNS recursive query path reversal
+
+**Code:**
+- Compiled and ran first `dns_node_init.cpp`
+- Understood `std::vector` traversal and `&` reference semantics for avoiding copies
 
 ---
 
-## 📅 5月3日
+### Day 2 — Structs & UDP Receiver
 
-### 🎯 今日目标
-- [x] 掌握 C++ 面向对象编程与 RAII 机制。
-- [x] 实现 UDP 全双工通信（Echo Server）。
+**Goals:**
+- Master C++ structs and memory layout
+- Build first UDP receiving program
 
-### 🧠 核心知识点沉淀
-1. **RAII 机制 (极其重要)**：利用 C++ 对象的生命周期自动管理底层资源。在 `UdpServer` 的构造函数中申请 Socket，在析构函数中调用 `close(fd)`，从根本上杜绝了网络编程中的端口/内存泄漏问题。
-2. **协议解析基石**：掌握了 `std::stack` 的用法（LeetCode 20 有效的括号），理解了利用栈结构进行报文边界匹配的底层逻辑。
+**Key Learnings:**
+- **Protocol headers**: Defined a 12-byte `DnsHeader` struct using `uint16_t` fixed-width types for cross-platform consistency
+- **Hash tables**: `std::unordered_map::find()` / `end()` — the foundation for future O(1) routing table lookups
+- **UDP three-step pattern**: `socket()` → `bind()` → `recvfrom()` with `sockaddr_in` for sender address capture
 
-### 💻 代码实战记录
-- 使用 C++ `class` 彻底重构了面条式的 UDP 代码。
-- 掌握了 `sendto()` 函数，利用 `recvfrom` 记录下的客户端地址，成功实现了服务器向客户端的 Echo 回复。
-- 闭环测试：在 `nc` 终端中成功看到了服务器返回的 `DNS++ ACK:` 数据。
+**Code:**
+- Wrote `udp_server.cpp` from scratch
+- Tested with `nc -u 127.0.0.1 8080` — server successfully printed received strings
 
-### 🚀 明日规划 (Day 4)
-- 引入自定义二进制协议头，解决网络字节序转换。
-- 彻底抛弃文本字符串，让服务器能解析真正的“结构化二进制数据”！
 ---
-## 📅 5月4日：二进制协议解析
 
-### 🎯 今日目标
-- [x] 掌握 C++ 指针强转，实现二进制协议反序列化。
-- [x] 提取并打印 UDP 数据包的源 IP 和端口。
-- [x] 使用终端发送十六进制二进制流进行测试。
+### Day 3 — OOP & RAII
 
-### 🧠 核心知识点沉淀
-1. **网络字节序解析 (`ntohs`)**：接收网络数据时，必须使用 `ntohs` 将大端序转换回主机的机器字节序，否则解析出的整数会完全错乱。
-2. **获取客户端信息**：`recvfrom` 会自动填充 `sockaddr_in` 结构体。通过 `inet_ntoa(addr.sin_addr)` 可以获取可读的 IP 字符串，通过 `ntohs(addr.sin_port)` 获取真实端口。
-3. **二进制强转魔法**：在 C++ 中，可以通过 `(DnsHeader*)buffer` 将接收到的无类型字节流，直接映射为结构化的协议头部，这是 C/C++ 处理网络协议最高效的方式（零拷贝解析）。
+**Goals:**
+- Master C++ OOP and RAII resource management
+- Implement full-duplex UDP (Echo Server)
 
-### 💻 代码实战记录
-- 编写 `dns_server_v2.cpp`，成功解析了 12 字节的 DNS 头部。
-- 掌握了使用 `printf '\x12\x34...' | nc -u` 模拟发送底层二进制数据包的黑客调试技巧。
+**Key Learnings:**
+- **RAII (critical)**: Socket allocated in constructor, `close(fd)` in destructor — eliminates port/memory leaks by design
+- **Protocol parsing foundation**: `std::stack` for bracket matching (LeetCode 20) — underpins structured binary message boundary logic
+
+**Code:**
+- Refactored procedural UDP code into a `UdpServer` class
+- Implemented `sendto()` echo reply using the `sockaddr_in` captured by `recvfrom()`
+- Verified round-trip: `nc` terminal received `DNS++ ACK:` response
+
 ---
-## 📅 5月5日：Pub/Sub 路由转发
 
-### 🎯 今日目标
-- [x] 掌握 `std::unordered_map`，实现内存路由表。
-- [x] 掌握快慢指针思想（LeetCode 141 环形链表）。
-- [x] 实现 DNS++ Broker 的核心逻辑：订阅记录与消息转发。
+### Day 4 — Binary Protocol Parsing
 
-### 🧠 核心知识点沉淀
-1. **快慢指针 (Fast & Slow Pointers)**：解决链表环问题的最优解。想象操场跑步，快跑者（走2步）必然会在环内套圈追上慢跑者（走1步）。
-2. **Pub/Sub 架构底层原理**：
-   - **Subscribe (订阅)**：Broker 收到请求后，将 `Topic ID` 作为 Key，客户端的 `sockaddr_in` 作为 Value，存入 `unordered_map`。
-   - **Publish (发布)**：Broker 收到数据后，以 `Topic ID` 去 map 中 `find()`。若找到，则调用 `sendto()` 将数据精准转发给对应的客户端。
-3. **内存对齐指令**：使用 `#pragma pack(1)` 强制结构体按 1 字节对齐，防止编译器自动填充空白字节，确保网络二进制解析的绝对精准。
+**Goals:**
+- Master pointer casting for binary deserialization
+- Extract source IP and port from UDP packets
+- Test with raw hex binary streams
 
-### 💻 代码实战记录
-- 编写 `dns_broker_v1.cpp`，成功实现了基于 UDP 的发布/订阅中间件。
-- 开启 3 个终端，成功模拟了 Client A 订阅、Client B 发布、Broker 成功路由转发的全过程。
+**Key Learnings:**
+- **`ntohs()` on receive**: Must convert network byte-order back to host order, otherwise integers decode as garbage
+- **Client info extraction**: `recvfrom` populates `sockaddr_in` — `inet_ntoa()` for IP string, `ntohs()` for port
+- **Zero-copy parsing**: `(DnsHeader*)buffer` reinterprets raw bytes as a structured header — the most efficient C/C++ protocol parsing technique
+
+**Code:**
+- Wrote `dns_server_v2.cpp` — successfully parsed 12-byte DNS header from raw binary
+- Learned `printf '\x12\x34...' | nc -u` for sending crafted binary packets
+
 ---
-## 📅 5月6日：多播路由与双指针
 
-### 🎯 今日目标
-- [x] 升级路由表支持一个 Topic 多个订阅者。
-- [x] 掌握双指针相交问题（LeetCode 160）。
-- [x] 实现 Broker 的多播（Multicast）转发功能。
+### Day 5 — Pub/Sub Routing
 
-### 🧠 核心知识点沉淀
-1. **多订阅者路由**：使用 `unordered_map<uint16_t, vector<sockaddr_in>>` 实现组播表。`push_back` 添加订阅，遍历 `vector` 逐一 `sendto` 实现多播。
-2. **相交链表双指针法**：“你走过我的路，我走过你的路”。当两个指针分别从 A 和 B 出发，走完自己的链表后切换到对方链表，总步数相等，必然在交点相遇或同时为 null。
+**Goals:**
+- Master `std::unordered_map` for in-memory routing tables
+- Implement DNS++ broker core: subscribe + publish forwarding
 
-### 💻 代码实战记录
-- 编写 `dns_broker_v2_multicast.cpp`，成功完成一个发布者向两个订阅者的消息同步推送。
+**Key Learnings:**
+- **Pub/Sub architecture**:
+  - *Subscribe*: Broker stores `Topic ID → client sockaddr_in` in `unordered_map`
+  - *Publish*: Broker looks up Topic ID, calls `sendto()` to forward to matched client
+- **Memory alignment**: `#pragma pack(1)` forces 1-byte struct alignment, preventing compiler padding — essential for correct binary protocol parsing
+- **Fast/slow pointers** (LeetCode 141): Conceptual foundation for cycle detection in linked routing paths
+
+**Code:**
+- Wrote `dns_broker_v1.cpp` — first working pub/sub middleware over UDP
+- 3-terminal test: Client A subscribes, Client B publishes, Broker routes successfully
+
 ---
-## 📅 5月7日：TTL 机制与位运算
 
-### 🎯 今日目标
-- [x] 编写第一个 C++ 网络客户端。
-- [x] 为 Broker 引入 TTL 机制，自动清理过期订阅。
-- [x] 掌握异或运算（LeetCode 136）。
+### Day 6 — Multicast Routing
 
-### 🧠 核心知识点沉淀
-1. **异或 (`^`) 魔法**：任何数和自己异或为 0，和 0 异或为自己。利用这个性质，可以在一次遍历、常数空间下找出数组中落单的数字。
-2. **TTL 与心跳机制**：
-   - 客户端定期发送心跳包（`msg_type=3`）告诉 Broker “我还活着”。
-   - Broker 维护 `topic_last_active` 表记录每个 Topic 的最后活跃时间。
-   - 定期任务扫描并 `erase` 超过 TTL（如 15 秒）无心跳的 Topic，避免给死地址盲发数据。
+**Goals:**
+- Upgrade routing table to support multiple subscribers per topic
+- Implement multicast forwarding
 
-### 💻 代码实战记录
-- 编写 `dns_client.cpp`，掌握了 `setsockopt(SO_RCVTIMEO)` 设置接收超时，以及 `std::this_thread::sleep_for` 控制发送间隔。
-- 升级 Broker，成功实现了心跳更新、定期清理的完整 TTL 生命周期。
+**Key Learnings:**
+- **Multi-subscriber routing**: `unordered_map<uint16_t, vector<sockaddr_in>>` — `push_back` to subscribe, iterate `vector` + `sendto` for multicast
+- **Intersecting linked lists** (LeetCode 160): Dual-pointer traversal — "you walk my path, I walk yours" — conceptually mirrors bidirectional broker forwarding
+
+**Code:**
+- Wrote `dns_broker_v2_multicast.cpp` — one publisher broadcasting to two subscribers simultaneously
+
 ---
-## 📅 5月8日：重构与格式化
 
-### 🎯 今日目标
-- [x] 掌握 `std::stringstream` 格式化输出。
-- [x] 了解 `std::queue` 消息缓冲队列。
-- [x] 掌握双栈实现最小栈（LeetCode 155）。
-- [x] 重构 Broker，提升代码可读性。
+### Day 7 — TTL & Heartbeat
 
-### 🧠 核心知识点沉淀
-1. **格式化输出 (`stringstream`)**：将分散的 `<<` 拼接统一为一个字符串对象，便于日志存储和远程监控。
-2. **消息队列 (`queue`)**：FIFO 结构，用于解耦网络 I/O 和业务处理。
-3. **最小栈设计哲学**：使用两个栈，辅助栈的栈顶始终保存当前全局最小值。这是“空间换时间”的经典应用。
+**Goals:**
+- Write first C++ network client
+- Implement TTL-based subscription expiry
 
-### 💻 代码实战记录
-- 重构 `dns_broker_v4_refactor.cpp`，所有日志输出改为 `stringstream` 统一管理。
+**Key Learnings:**
+- **TTL + Heartbeat mechanism**:
+  - Client sends periodic heartbeat (`msg_type=3`) to signal liveness
+  - Broker maintains `topic_last_active` timestamp map
+  - Periodic scan removes entries older than TTL (15s) — prevents sending to dead addresses
+- **Socket receive timeout**: `setsockopt(SO_RCVTIMEO)` for non-blocking client receives
+- **XOR properties** (LeetCode 136): `a ^ a = 0`, `a ^ 0 = a` — foundation for understanding Paillier blinding cancellation (Phase 3)
+
+**Code:**
+- Wrote `dns_client.cpp` with `SO_RCVTIMEO` and `std::this_thread::sleep_for`
+- Full TTL lifecycle: heartbeat → update → expire → cleanup
+
 ---
-## 📅 5月9日：多线程日志
 
-### 🎯 今日目标
-- [x] 掌握 `std::thread`、`join`、`detach`、互斥锁概念。
-- [x] 用双栈实现队列（LeetCode 232）。
-- [x] 重构 Broker 使用后台线程处理日志。
+### Day 8 — Refactor & Formatting
 
-### 🧠 核心知识点沉淀
-1. **多线程启蒙**：主线程处理网络 I/O，后台线程（Logger）处理耗时操作（日志输出），实现并发。
-2. **生产者-消费者模型**：主线程生产日志字符串（pushLog），消费者线程（Logger::process）取出并打印。通过 `std::mutex` 和 `std::condition_variable` 实现安全通信。
-3. **双栈模拟队列**：入队全压入 inStack，出队时若 outStack 为空，将 inStack 元素全部弹出压入 outStack，即可实现 FIFO。均摊 O(1)。
+**Goals:**
+- Master `std::stringstream` for structured output
+- Understand `std::queue` for message buffering
+- Refactor broker for readability
+
+**Key Learnings:**
+- **String formatting**: `stringstream` unifies `<<` chained output into a single string object — clean for logging and monitoring
+- **Message queue**: FIFO `std::queue` decouples network I/O from business logic processing
+- **Min-stack design** (LeetCode 155): Auxiliary stack tracking global minimum — "space trade for time" principle applicable to routing table optimization
+
+**Code:**
+- Refactored to `dns_broker_v4_refactor.cpp` — all log output unified through `stringstream`
+
+---
+
+### Day 9 — Multithreaded Logging
+
+**Goals:**
+- Master `std::thread`, `join`, `detach`, `mutex`
+- Implement background logger thread
+
+**Key Learnings:**
+- **Producer-consumer model**: Main thread produces log strings (`pushLog`), background thread consumes and writes (`process`). `std::mutex` + `std::condition_variable` for safe coordination
+- **Two-stack queue** (LeetCode 232): `inStack` for enqueue, `outStack` for dequeue — amortized O(1) FIFO using LIFO primitives
+
+**Code:**
+- Integrated dedicated logger thread into broker — main loop stays responsive
+
+---
+
+## Phase 1: TLV Protocol & Spatial Routing (June 2025)
+
+### Week 1 — Protocol Upgrade & Algorithm 1 Implementation
+
+**Goals:**
+- Replace fixed-header protocol with extensible TLV format
+- Implement Algorithm 1 (Proximity Routing) per paper §3.4
+- Add string-based service names, coordinates, query_mode, per-subscriber closest cache
+
+**Design Decisions:**
+
+| Decision | Rationale |
+|----------|-----------|
+| TLV (Type-Length-Value) format | Phase 3 adds blinded cryptographic values without protocol changes |
+| `std::string` service names | Paper supports any URI as a name, not just numeric IDs |
+| Per-subscriber `cached_closest_dist` | Paper Algorithm 1 lines 7–9: each subscriber tracks their own closest publication |
+| Equirectangular distance | Single `cos()` call; sufficient accuracy for routing (not navigation) |
+| `Region` struct with MBH operations | Foundation for Phase 2 hierarchical overlay and quadrant-based brake |
+
+**Key Changes from Phase 0:**
+
+1. **Protocol**: 12/20-byte fixed headers → 8-byte fixed header + variable TLV fields + variable payload
+2. **Routing**: Single-nearest-subscriber delivery → per-subscriber closest cache (Algorithm 1 compliant)
+3. **Topic key**: `uint16_t topic_id` → `std::string service_name`
+4. **Query mode**: Not implemented → returns cached nearest publication immediately
+5. **Distance**: Raw Euclidean → Equirectangular approximation (accounts for longitude convergence)
+6. **Publication cache**: None → `pub_cache[service_name]` stores recent publications for query_mode
+
+**Implementation Details:**
+
+- `TlvMessage` class: Zero-copy parser wrapping a raw `recvfrom` buffer; traverses TLV fields by pointer arithmetic
+- `TlvMessageBuilder` class: Constructs wire-format packets with `addCoordinates()`, `addServiceName()`, `addFlags()`, `setPayload()`
+- `geo.h`: `Region` struct with `contains()`, `overlaps()`, `merge()`, `quadrantCenters()`, `quadrantOf()` — ready for Phase 2
+- `brakeAllows()`: Per-service, per-quadrant sliding window counter — configurable limit and window
+- `handleSubscribe()`: Inserts into `subscribers[name]`, initializes `cached_closest_dist = ∞`, returns cached pub if `QUERY_MODE` flag set
+- `handlePublish()`: Brake check → cache publication → iterate all subscribers, forward to those for whom `dist < cached_closest_dist`
+
+**Test Scenario:**
+
+```
+Broker on port 8080, brake_limit=2, window=10s
+
+Subscriber A: London (51.5, -0.1)
+Subscriber B: Berlin (52.5, 13.4)
+
+Publisher 1: Paris (48.8, 2.3)  →  Both receive (first pub, closest=∞)
+Publisher 2: Warsaw (52.2, 21.0) →  Only Berlin receives (Warsaw closer to Berlin than Paris)
+                                      London does NOT receive (Warsaw farther than Paris)
+```
+
+This validates Algorithm 1's per-subscriber closest filtering: each subscriber independently tracks their nearest replica.
+
+**Files Created/Modified:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/protocol/TlvMessage.h` | Created | TLV protocol definition, parser, builder |
+| `src/protocol/TlvMessage.cpp` | Created | Serialization/deserialization implementation |
+| `src/utils/geo.h` | Created | Region (MBH), distance, quadrant utilities |
+| `src/broker/broker.h` | Rewritten | Algorithm 1 data structures, string service names |
+| `src/broker/broker.cpp` | Rewritten | TLV message handling, per-subscriber closest, brake, query_mode |
+| `src/main.cpp` | Updated | CLI args for port, brake_limit, brake_window |
+| `clients/test_client.cpp` | Created | CLI test client (sub/pub/beat modes) |
+| `CMakeLists.txt` | Updated | Added test_client target, TlvMessage source |
+
+---
+
+### Next Steps (Week 2)
+
+- [ ] Unit tests for TLV serialization round-trip
+- [ ] Unit tests for distance and quadrant calculations
+- [ ] Multi-publisher convergence test (5+ publishers, verify closest stabilizes)
+- [ ] Brake parameter sweep test (limit=1 vs 2 vs 4 vs ∞, measure recall)
+- [ ] Begin Phase 2 design: broker configuration file format, HELLO handshake
+
+---
+
+## Technical Glossary
+
+| Term | Definition |
+|------|------------|
+| **Broker** | DNS++ overlay node that routes subscriptions and publications |
+| **MBH** | Minimum Bounding Hyperrectangle — the spatial region managed by a broker |
+| **Brake** | Per-quadrant rate limiter on upward publication propagation (Algorithm 1) |
+| **Closest cache** | Per-subscriber state tracking the distance of the nearest received publication |
+| **Query mode** | Subscription flag requesting immediate return of cached publications |
+| **HEPS** | Homomorphic Encryption Parameter Service — trusted key distribution authority |
+| **Paillier** | Partially homomorphic encryption scheme supporting addition on ciphertexts |
+| **Blinding** | Encryption operation producing semantically secure, non-reversible ciphertexts |
+| **Match** | Homomorphic operation comparing a blinded publication against a blinded subscription |
+| **Cover** | Homomorphic operation comparing two blinded subscriptions for routing table construction |
+| **FPR** | False Positive Ratio — threshold controlling subscription region aggregation (Algorithm 2) |
+| **Stretch** | Ratio of actual delivery distance to optimal (ground-truth nearest) distance |
+| **Recall** | Proportion of true closest publications successfully delivered to subscribers |
+
+---
+
+*This log is updated continuously as development progresses.*
