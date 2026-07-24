@@ -1,0 +1,5 @@
+Trial 0: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=5 down=5 local=168 braked=15 | Traffic Ratio=1.05952
+Trial 1: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=5 down=5 local=164 braked=15 | Traffic Ratio=1.06098
+Trial 2: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=5 down=5 local=152 braked=15 | Traffic Ratio=1.06579
+Trial 3: recall=0.84 avg_stretch=1.1745 delivered=50/50 | Traffic: up=4 down=4 local=168 braked=16 | Traffic Ratio=1.04762
+Trial 4: recall=0.86 avg_stretch=1.03256 delivered=50/50 | Traffic: up=4 down=4 local=159 braked=16 | Traffic Ratio=1.05031

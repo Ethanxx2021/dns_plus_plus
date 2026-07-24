@@ -209,3 +209,39 @@ size_t TlvMessageBuilder::build(uint8_t* buffer, size_t max_len) const {
     std::memcpy(buffer, vec.data(), vec.size());
     return vec.size();
 }
+// ============================================================
+// Region TLV support
+// ============================================================
+
+void TlvMessageBuilder::addRegion(const Region& r) {
+    float net_min_lat = htonf(static_cast<float>(r.min_lat));
+    float net_max_lat = htonf(static_cast<float>(r.max_lat));
+    float net_min_lon = htonf(static_cast<float>(r.min_lon));
+    float net_max_lon = htonf(static_cast<float>(r.max_lon));
+    
+    uint8_t buf[16];
+    std::memcpy(buf,      &net_min_lat, 4);
+    std::memcpy(buf + 4,  &net_max_lat, 4);
+    std::memcpy(buf + 8,  &net_min_lon, 4);
+    std::memcpy(buf + 12, &net_max_lon, 4);
+    addTlv(TlvType::REGION, buf, 16);
+}
+
+std::optional<Region> TlvMessage::getRegion() const {
+    uint16_t len;
+    const uint8_t* v = findTlv(TlvType::REGION, &len);
+    if (!v || len < 16) return std::nullopt;
+
+    float min_lat, max_lat, min_lon, max_lon;
+    std::memcpy(&min_lat, v, 4);
+    std::memcpy(&max_lat, v + 4, 4);
+    std::memcpy(&min_lon, v + 8, 4);
+    std::memcpy(&max_lon, v + 12, 4);
+
+    Region r;
+    r.min_lat = ntohf(min_lat);
+    r.max_lat = ntohf(max_lat);
+    r.min_lon = ntohf(min_lon);
+    r.max_lon = ntohf(max_lon);
+    return r;
+}

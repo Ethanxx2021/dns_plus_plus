@@ -1,6 +1,7 @@
 #ifndef BROKER_H
 #define BROKER_H
 
+#include <unordered_set>
 #include <queue>
 #include <netinet/in.h>
 #include <unordered_map>
@@ -9,76 +10,97 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <array>
 
 #include "protocol/TlvMessage.h"
 #include "logger/logger.h"
 #include "utils/geo.h"
 
-// A subscriber with coordinates and per-subscriber closest cache.
-// This implements Algorithm 1's closest[S] state.
 struct GeoClient {
     struct sockaddr_in addr;
     float lat;
     float lon;
-    // Algorithm 1, line 2/8: closest[N_in] / closest[S]
-    // Initialized to infinity — first publication always qualifies.
     double cached_closest_dist = std::numeric_limits<double>::max();
 };
 
-// A cached publication (for query_mode immediate response)
 struct CachedPub {
     float lat;
     float lon;
-    std::vector<uint8_t> raw_message;  // original TLV message bytes
+    std::vector<uint8_t> raw_message;
+};
+
+struct ChildBroker {
+    std::string id;
+    struct sockaddr_in addr;
+    float lat;
+    float lon;
+    Region region;
+    bool active = false;
+    std::array<double, 4> closest_quad = {
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::max()
+    };
+};
+
+struct BrokerConfig {
+    std::string broker_id;
+    uint16_t listen_port;
+    std::string parent_addr;
+    float lat;
+    float lon;
+    int brake_limit;
+    time_t brake_window_sec;
 };
 
 class DnsMulticastBroker {
 public:
-    explicit DnsMulticastBroker(uint16_t port,
-                               int brake_limit = 2,
-                               time_t brake_window_sec = 10);
+    explicit DnsMulticastBroker(const BrokerConfig& config);
     ~DnsMulticastBroker();
     void start();
 
 private:
     int server_fd;
-    int brake_limit;
-    time_t brake_window_sec;
+    BrokerConfig config_;
+    
+    Region my_region_;
+    bool has_parent_ = false;
+    struct sockaddr_in parent_addr_;
+    std::unordered_map<std::string, ChildBroker> children_;
 
     Logger logger;
 
-    // ---------- Routing Tables ----------
-    // Key is service_name (string, per paper §3.3)
-    // IT[] — Input Table: subscribers per service name
+    // ---------- 路由表 ----------
     std::unordered_map<std::string, std::vector<GeoClient>> subscribers;
-
-    // Cached publications per service name (for query_mode)
     std::unordered_map<std::string, std::vector<CachedPub>> pub_cache;
-
-    // TTL tracking per service name
     std::unordered_map<std::string, time_t> last_active;
+    std::unordered_map<std::string, std::unordered_map<int, std::queue<time_t>>> brake_count;
+    std::unordered_map<std::string, std::unordered_set<std::string>> child_active_;
+    std::unordered_set<std::string> ot_parent_;
 
-    // Brake: per service_name, per quadrant, sliding window of timestamps
-    std::unordered_map<std::string,
-                       std::unordered_map<int, std::queue<time_t>>> brake_count;
+    // ---------- 统计计数器 ----------
+    uint64_t stat_forward_up = 0;
+    uint64_t stat_forward_down = 0;
+    uint64_t stat_delivered_local = 0;
+    uint64_t stat_braked = 0;
 
-    // ---------- Helpers ----------
+    // ---------- 辅助函数 ----------
     std::string clientAddrStr(const struct sockaddr_in& addr) const;
     int getQuadrant(float lat, float lon) const;
-
-    // Check if a publication passes the brake
     bool brakeAllows(const std::string& service, float lat, float lon);
+    void updateMyRegion();
+    std::string findChildByAddr(const struct sockaddr_in& addr) const;
 
-    // ---------- Message Handlers ----------
-    void handleSubscribe(const TlvMessage& msg,
-                         const struct sockaddr_in& client);
-    void handlePublish(const TlvMessage& msg,
-                       const struct sockaddr_in& client);
-    void handleHeartbeat(const TlvMessage& msg,
-                         const struct sockaddr_in& client);
-
-    // ---------- Periodic Maintenance ----------
+    // ---------- 消息处理器 ----------
+    void handleSubscribe(const TlvMessage& msg, const struct sockaddr_in& client);
+    void handlePublish(const TlvMessage& msg, const struct sockaddr_in& client);
+    void handleHeartbeat(const TlvMessage& msg, const struct sockaddr_in& client);
+    void handleHello(const TlvMessage& msg, const struct sockaddr_in& child_addr);
+    void handleRegionUpdate(const TlvMessage& msg, const struct sockaddr_in& child_addr);
+    void sendRegionUpdateToParent();
+    void handleStatsRequest(const struct sockaddr_in& client);
     void cleanupExpired();
 };
 
-#endif // BROKER_H
+#endif
