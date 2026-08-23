@@ -245,3 +245,32 @@ std::optional<Region> TlvMessage::getRegion() const {
     r.max_lon = ntohf(max_lon);
     return r;
 }
+// ============================================================
+// Phase 3: Blinded Value Support
+// ============================================================
+
+std::optional<std::string> TlvMessage::getBlindedValue() const {
+    uint16_t len;
+    const uint8_t* v = findTlv(TlvType::BLINDED_VALUE, &len);
+    if (!v) return std::nullopt;
+    return std::string(reinterpret_cast<const char*>(v), len);
+}
+
+std::optional<std::string> TlvMessage::getBlindedValueHi() const {
+    uint16_t len;
+    const uint8_t* v = findTlv(TlvType::BLINDED_VALUE_HI, &len);
+    if (!v) return std::nullopt;
+    return std::string(reinterpret_cast<const char*>(v), len);
+}
+
+void TlvMessageBuilder::addBlindedValue(const std::string& hex_str) {
+    addTlv(TlvType::BLINDED_VALUE,
+           reinterpret_cast<const uint8_t*>(hex_str.data()),
+           static_cast<uint16_t>(hex_str.size()));
+}
+
+void TlvMessageBuilder::addBlindedValueHi(const std::string& hex_str) {
+    addTlv(TlvType::BLINDED_VALUE_HI,
+           reinterpret_cast<const uint8_t*>(hex_str.data()),
+           static_cast<uint16_t>(hex_str.size()));
+}

@@ -1,0 +1,5 @@
+Trial 0: recall=1 avg_stretch=1 delivered=50/50 avg_latency=110.083ms (Plaintext)
+Trial 1: recall=1 avg_stretch=1 delivered=50/50 avg_latency=108.354ms (Plaintext)
+Trial 2: recall=1 avg_stretch=1 delivered=50/50 avg_latency=106.636ms (Plaintext)
+Trial 3: recall=1 avg_stretch=1 delivered=50/50 avg_latency=113.234ms (Plaintext)
+Trial 4: recall=1 avg_stretch=1 delivered=50/50 avg_latency=107.569ms (Plaintext)

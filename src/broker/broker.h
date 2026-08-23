@@ -11,7 +11,7 @@
 #include <optional>
 #include <string>
 #include <array>
-
+#include <gmpxx.h>
 #include "protocol/TlvMessage.h"
 #include "logger/logger.h"
 #include "utils/geo.h"
@@ -21,6 +21,8 @@ struct GeoClient {
     float lat;
     float lon;
     double cached_closest_dist = std::numeric_limits<double>::max();
+    std::string blinded_m1; // Phase 3: bval_m(E(-v))
+    std::string blinded_m2; // Phase 3: bval_m(E(-(v+1)))
 };
 
 struct CachedPub {
@@ -84,6 +86,17 @@ private:
     uint64_t stat_forward_down = 0;
     uint64_t stat_delivered_local = 0;
     uint64_t stat_braked = 0;
+
+    // ---------- Phase 3: Encrypted Matching ----------
+    mpz_class he_n_;
+    mpz_class he_mu_;
+    mpz_class he_n_sq_;
+    bool he_enabled_ = false;
+
+    bool executeMatch(const std::string& bval_n_hex, 
+                      const std::string& bval_m1_hex, 
+                      const std::string& bval_m2_hex) const;
+    void initCrypto();
 
     // ---------- 辅助函数 ----------
     std::string clientAddrStr(const struct sockaddr_in& addr) const;

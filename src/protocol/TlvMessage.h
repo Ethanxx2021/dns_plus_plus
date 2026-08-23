@@ -66,6 +66,9 @@ inline float ntohf(float f) {
 // ============================================================
 class TlvMessage {
 public:
+    // For Phase 3 Encrypted Matching
+    std::optional<std::string> getBlindedValue() const;      // bval_n or bval_m1
+    std::optional<std::string> getBlindedValueHi() const;    // bval_m2
     TlvMessage(const uint8_t* data, size_t len);
 
     bool     isValid()    const { return valid_; }
@@ -103,6 +106,8 @@ private:
 // ============================================================
 class TlvMessageBuilder {
 public:
+    void addBlindedValue(const std::string& hex_str);
+    void addBlindedValueHi(const std::string& hex_str);
     explicit TlvMessageBuilder(MsgType type);
 
     void addCoordinates(float lat, float lon);

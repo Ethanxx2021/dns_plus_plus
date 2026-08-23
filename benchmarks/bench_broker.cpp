@@ -1,26 +1,18 @@
 // benchmarks/bench_broker.cpp
 //
-// Automated benchmark for DNS++ Phase 1 (single-broker Proximity Routing)
-//
-// Measures:
-//   - Recall: did subscriber receive their true closest publisher?
-//   - Stretch: distance to received pub / distance to optimal pub
-//   - Delivery count: how many publications each subscriber received
+// Automated benchmark for DNS++ Phase 1/3
 //
 // Usage:
-//   ./bench_broker <broker_ip> <broker_port> <num_pubs> <num_subs> <brake_limit> <num_trials> [seed]
+//   ./bench_broker <broker_ip> <broker_port> <num_pubs> <num_subs> <brake_limit> <num_trials> [seed] [encrypted=0/1]
 //
 // Output:
 //   stdout: CSV (per-subscriber detail, one row per subscriber per trial)
 //   stderr: Summary (per-trial aggregate)
-//
-// Example:
-//   ./bench_broker 127.0.0.1 8080 10 50 2 30 42 > results.csv
 
 #include "protocol/TlvMessage.h"
 #include "utils/geo.h"
+#include "crypto/Heps.h"
 #include <iostream>
-#include <fstream>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -45,11 +37,9 @@ struct Subscriber {
     float lon;
     int fd = -1;
 
-    // Ground truth
     int optimal_pub_id   = -1;
     double optimal_dist  = 0.0;
 
-    // Received publications
     struct ReceivedPub {
         int pub_id;
         double latency_ms;
@@ -61,7 +51,7 @@ int main(int argc, char* argv[]) {
     if (argc < 7) {
         std::cerr << "Usage: " << argv[0]
                   << " <broker_ip> <broker_port> <num_pubs> <num_subs>"
-                  << " <brake_limit> <num_trials> [seed]" << std::endl;
+                  << " <brake_limit> <num_trials> [seed] [encrypted=0/1]" << std::endl;
         return 1;
     }
 
@@ -72,24 +62,27 @@ int main(int argc, char* argv[]) {
     int         brake_limit = std::atoi(argv[5]);
     int         num_trials  = std::atoi(argv[6]);
     uint32_t    seed        = (argc >= 8) ? static_cast<uint32_t>(std::atoi(argv[7])) : 42;
+    bool        encrypted   = (argc >= 9) ? (std::atoi(argv[8]) == 1) : false;
 
     srand(seed);
 
-    // Broker address
+    Heps heps;
+    if (encrypted) {
+        heps.loadState("/tmp/dnspp_heps_full.key");
+    }
+
     struct sockaddr_in broker_addr{};
     broker_addr.sin_family = AF_INET;
     broker_addr.sin_port   = htons(broker_port);
     inet_pton(AF_INET, broker_ip.c_str(), &broker_addr.sin_addr);
 
-    // CSV header
-    std::cout << "trial,num_pubs,num_subs,brake_limit,sub_id,sub_lat,sub_lon,"
+    std::cout << "trial,num_pubs,num_subs,brake_limit,encrypted,sub_id,sub_lat,sub_lon,"
               << "optimal_pub_id,optimal_dist,received_pub_id,received_dist,"
-              << "stretch,recall,num_received" << std::endl;
+              << "stretch,recall,num_received,latency_ms" << std::endl;
 
     for (int t = 0; t < num_trials; t++) {
         std::string service = "bench_" + std::to_string(t);
 
-        // --- Generate random coordinates ---
         std::vector<Publisher> pubs(num_pubs);
         for (int i = 0; i < num_pubs; i++) {
             pubs[i].id  = i;
@@ -104,7 +97,6 @@ int main(int argc, char* argv[]) {
             subs[i].lon = -180.0f + static_cast<float>(rand()) / RAND_MAX * 360.0f;
         }
 
-        // --- Compute ground truth (closest publisher for each subscriber) ---
         for (auto& s : subs) {
             double min_dist = 1e18;
             int closest = -1;
@@ -116,7 +108,6 @@ int main(int argc, char* argv[]) {
             s.optimal_dist   = min_dist;
         }
 
-        // --- Create subscriber sockets and send SUBSCRIBE ---
         for (auto& s : subs) {
             s.fd = socket(AF_INET, SOCK_DGRAM, 0);
             struct sockaddr_in addr{};
@@ -128,35 +119,43 @@ int main(int argc, char* argv[]) {
             TlvMessageBuilder builder(MsgType::SUBSCRIBE);
             builder.addServiceName(service);
             builder.addCoordinates(s.lat, s.lon);
+            
+            if (encrypted) {
+                auto [bval_m1, bval_m2] = heps.blindSubscription(service);
+                builder.addBlindedValue(bval_m1);
+                builder.addBlindedValueHi(bval_m2);
+            }
+            
             auto pkt = builder.build();
             sendto(s.fd, pkt.data(), pkt.size(), 0,
                    (struct sockaddr*)&broker_addr, sizeof(broker_addr));
         }
 
-        // Wait for subscriptions to be processed
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-        // --- Send publications ---
         auto publish_start = std::chrono::steady_clock::now();
 
         for (const auto& p : pubs) {
             TlvMessageBuilder builder(MsgType::PUBLISH);
             builder.addServiceName(service);
             builder.addCoordinates(p.lat, p.lon);
-            builder.setPayload(std::to_string(p.id));  // pub_id as payload
+            builder.setPayload(std::to_string(p.id));
+            
+            if (encrypted) {
+                std::string bval_n = heps.blindNotification(service);
+                builder.addBlindedValue(bval_n);
+            }
+            
             auto pkt = builder.build();
 
-            // Use temp socket for publishing (no response needed)
             int fd = socket(AF_INET, SOCK_DGRAM, 0);
             sendto(fd, pkt.data(), pkt.size(), 0,
                    (struct sockaddr*)&broker_addr, sizeof(broker_addr));
             close(fd);
 
-            // Small delay between publications to let broker process
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
-        // --- Collect responses (poll all subscriber sockets) ---
         std::vector<pollfd> pfds(subs.size());
         for (size_t i = 0; i < subs.size(); i++) {
             pfds[i].fd     = subs[i].fd;
@@ -177,12 +176,11 @@ int main(int argc, char* argv[]) {
 
             for (size_t i = 0; i < pfds.size(); i++) {
                 if (pfds[i].revents & POLLIN) {
-                    uint8_t buf[2048];
+                    uint8_t buf[4096];
                     int n = recv(pfds[i].fd, buf, sizeof(buf), 0);
                     if (n > 0) {
                         TlvMessage msg(buf, static_cast<size_t>(n));
                         if (msg.isValid() && msg.getMsgType() == MsgType::PUBLISH) {
-                            // Extract pub_id from payload
                             std::string payload_str(
                                 reinterpret_cast<const char*>(msg.getPayload()),
                                 msg.getPayloadSize());
@@ -193,7 +191,6 @@ int main(int argc, char* argv[]) {
                                     recv_time - publish_start).count();
                                 subs[i].received.push_back({pub_id, latency_ms});
                             } catch (...) {
-                                // Ignore malformed payload
                             }
                         }
                     }
@@ -201,21 +198,25 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // --- Compute metrics and output CSV ---
         int    total_recall   = 0;
         double total_stretch  = 0.0;
         int    total_received = 0;
+        double total_latency  = 0.0;
 
         for (const auto& s : subs) {
-            // Find closest received publication
             double best_dist = 1e18;
             int    best_pub  = -1;
+            double best_latency = -1.0;
 
             for (const auto& rp : s.received) {
                 if (rp.pub_id >= 0 && rp.pub_id < num_pubs) {
                     double d = geoDistance(s.lat, s.lon,
                                            pubs[rp.pub_id].lat, pubs[rp.pub_id].lon);
-                    if (d < best_dist) { best_dist = d; best_pub = rp.pub_id; }
+                    if (d < best_dist) { 
+                        best_dist = d; 
+                        best_pub = rp.pub_id; 
+                        best_latency = rp.latency_ms;
+                    }
                 }
             }
 
@@ -225,32 +226,37 @@ int main(int argc, char* argv[]) {
 
             if (recall) total_recall++;
             if (best_pub >= 0) { total_stretch += stretch; total_received++; }
+            if (best_latency >= 0) total_latency += best_latency;
 
             std::cout << t << ","
                       << num_pubs << "," << num_subs << "," << brake_limit << ","
+                      << (encrypted ? 1 : 0) << ","
                       << s.id << "," << s.lat << "," << s.lon << ","
                       << s.optimal_pub_id << "," << s.optimal_dist << ","
                       << best_pub << ","
                       << (best_pub >= 0 ? best_dist : -1.0) << ","
                       << stretch << "," << (recall ? 1 : 0) << ","
-                      << s.received.size() << std::endl;
+                      << s.received.size() << ","
+                      << best_latency << std::endl;
         }
 
-        // Summary to stderr
         double avg_recall = static_cast<double>(total_recall) / subs.size();
         double avg_stretch = (total_received > 0)
                              ? total_stretch / total_received : -1.0;
+        double avg_latency = (total_received > 0)
+                             ? total_latency / total_received : -1.0;
+                             
         std::cerr << "Trial " << t << ": recall=" << avg_recall
                   << " avg_stretch=" << avg_stretch
                   << " delivered=" << total_received << "/" << subs.size()
+                  << " avg_latency=" << avg_latency << "ms"
+                  << (encrypted ? " (Encrypted)" : " (Plaintext)")
                   << std::endl;
 
-        // Close subscriber sockets
         for (auto& s : subs) {
             if (s.fd >= 0) close(s.fd);
         }
 
-        // Brief pause between trials (let broker TTL expire old entries)
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 

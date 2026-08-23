@@ -9,11 +9,33 @@
 #include <errno.h>
 #include <cmath>
 #include <endian.h>
+#include <gmpxx.h>
+#include <fstream>
+#include "crypto/Paillier.h"
 
 #define MAX_EVENTS 10
 #define TTL_SECONDS 15
 #define CLEANUP_INTERVAL_SEC 10
 #define EPOLL_TIMEOUT_MS 3000
+
+// Helper: hex string to mpz_class
+mpz_class hexToMpz(const std::string& hex) {
+    mpz_class val;
+    mpz_set_str(val.get_mpz_t(), hex.c_str(), 16);
+    return val;
+}
+
+// Helper: mpz_class to hex string
+std::string mpzToHex(const mpz_class& val) {
+    char* str = mpz_get_str(nullptr, 16, val.get_mpz_t());
+    std::string result(str);
+    free(str);
+    return result;
+}
+
+// ============================================================
+// Construction / Destruction
+// ============================================================
 
 DnsMulticastBroker::DnsMulticastBroker(const BrokerConfig& config)
     : server_fd(-1), config_(config)
@@ -50,6 +72,9 @@ DnsMulticastBroker::DnsMulticastBroker(const BrokerConfig& config)
     my_region_.min_lat = my_region_.max_lat = config_.lat;
     my_region_.min_lon = my_region_.max_lon = config_.lon;
 
+    // Phase 3: Initialize Crypto
+    initCrypto();
+
     std::stringstream ss;
     ss << "[Broker " << config_.broker_id << "] Listening on port " << config_.listen_port
        << " (brake_limit=" << config_.brake_limit << ")";
@@ -58,12 +83,91 @@ DnsMulticastBroker::DnsMulticastBroker(const BrokerConfig& config)
     } else {
         ss << " (ROOT)";
     }
+    if (he_enabled_) {
+        ss << " (HE Enabled)";
+    }
     logger.pushLog(ss.str());
 }
 
 DnsMulticastBroker::~DnsMulticastBroker() {
     close(server_fd);
 }
+
+// ============================================================
+// Phase 3: Crypto Initialization
+// ============================================================
+void DnsMulticastBroker::initCrypto() {
+    std::string key_file = "/tmp/dnspp_heps.key";
+    std::string full_key_file = "/tmp/dnspp_heps_full.key";
+    
+    if (!has_parent_) {
+        Paillier p;
+        p.keyGen(2048);
+        he_n_ = p.getN();
+        he_mu_ = p.getMu();
+        he_n_sq_ = he_n_ * he_n_;
+        he_enabled_ = true;
+
+        // Save public key for leaf brokers
+        std::ofstream ofs(key_file);
+        ofs << mpzToHex(he_n_) << "\n";
+        ofs << mpzToHex(he_mu_) << "\n";
+        ofs.close();
+
+        // Save full state for clients (acting as HEPS proxy for blinding)
+        std::ofstream ofs_full(full_key_file);
+        ofs_full << mpzToHex(p.getN()) << "\n";
+        ofs_full << mpzToHex(p.getMu()) << "\n";
+        ofs_full << mpzToHex(p.getLambda()) << "\n";
+        ofs_full << mpzToHex(p.getEM()) << "\n";
+        ofs_full << mpzToHex(p.getDM()) << "\n";
+        ofs_full << mpzToHex(p.getRM()) << "\n";
+        ofs_full.close();
+    } else {
+        // Leaf Broker: Read public key from file
+        std::ifstream ifs(key_file);
+        std::string n_hex, mu_hex;
+        if (std::getline(ifs, n_hex) && std::getline(ifs, mu_hex)) {
+            he_n_ = hexToMpz(n_hex);
+            he_mu_ = hexToMpz(mu_hex);
+            he_n_sq_ = he_n_ * he_n_;
+            he_enabled_ = true;
+        } else {
+            std::cerr << "Warning: Could not read HEPS key file. Running in plaintext mode." << std::endl;
+            he_enabled_ = false;
+        }
+    }
+}
+
+bool DnsMulticastBroker::executeMatch(const std::string& bval_n_hex, 
+                                      const std::string& bval_m1_hex, 
+                                      const std::string& bval_m2_hex) const {
+    if (bval_n_hex.empty() || bval_m1_hex.empty() || bval_m2_hex.empty()) return false;
+
+    mpz_class bval_n = hexToMpz(bval_n_hex);
+    mpz_class bval_m1 = hexToMpz(bval_m1_hex);
+    mpz_class bval_m2 = hexToMpz(bval_m2_hex);
+
+    // 1. Check x >= v
+    mpz_class y1 = (bval_n * bval_m1) % he_n_sq_;
+    mpz_class L_y1 = (y1 - 1) / he_n_;
+    mpz_class diff1 = (L_y1 * he_mu_) % he_n_;
+
+    if (diff1 >= he_n_ / 2) return false; // x < v
+
+    // 2. Check x < v+1
+    mpz_class y2 = (bval_n * bval_m2) % he_n_sq_;
+    mpz_class L_y2 = (y2 - 1) / he_n_;
+    mpz_class diff2 = (L_y2 * he_mu_) % he_n_;
+
+    if (diff2 <= he_n_ / 2) return false; // x >= v+1
+
+    return true; // Match!
+}
+
+// ============================================================
+// Helpers
+// ============================================================
 
 std::string DnsMulticastBroker::clientAddrStr(const struct sockaddr_in& addr) const {
     std::stringstream ss;
@@ -103,6 +207,9 @@ void DnsMulticastBroker::updateMyRegion() {
     }
 }
 
+// ============================================================
+// SUBSCRIBE
+// ============================================================
 void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct sockaddr_in& client) {
     auto name = msg.getServiceName();
     if (!name) return;
@@ -139,8 +246,18 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
     gc.lon  = lon;
     gc.cached_closest_dist = std::numeric_limits<double>::max();
 
-    subscribers[*name].push_back(gc);
-    last_active[*name] = time(nullptr);
+    // Phase 3: Use blinded values as key if available
+    auto bval_m1 = msg.getBlindedValue();
+    auto bval_m2 = msg.getBlindedValueHi();
+    std::string sub_key = (bval_m1 && he_enabled_) ? *bval_m1 : *name;
+
+    if (bval_m1 && bval_m2) {
+        gc.blinded_m1 = *bval_m1;
+        gc.blinded_m2 = *bval_m2;
+    }
+
+    subscribers[sub_key].push_back(gc);
+    last_active[sub_key] = time(nullptr);
 
     Region old_region = my_region_;
     my_region_.min_lat = std::min(my_region_.min_lat, (double)lat);
@@ -155,7 +272,7 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
     }
 
     if (flags & MsgFlags::QUERY_MODE) {
-        auto it = pub_cache.find(*name);
+        auto it = pub_cache.find(sub_key);
         if (it != pub_cache.end() && !it->second.empty()) {
             const CachedPub* best = nullptr;
             double best_dist = std::numeric_limits<double>::max();
@@ -166,22 +283,25 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
             if (best) {
                 sendto(server_fd, best->raw_message.data(), best->raw_message.size(), 0,
                        (const struct sockaddr*)&client, sizeof(client));
-                subscribers[*name].back().cached_closest_dist = best_dist;
+                subscribers[sub_key].back().cached_closest_dist = best_dist;
             }
         }
     }
 
-    if (has_parent_ && ot_parent_.find(*name) == ot_parent_.end()) {
+    if (has_parent_ && ot_parent_.find(sub_key) == ot_parent_.end()) {
         TlvMessageBuilder fwd(MsgType::SUBSCRIBE);
-        fwd.addServiceName(*name);
+        fwd.addServiceName(sub_key); // Propagate the blinded key upwards
         fwd.addCoordinates(config_.lat, config_.lon);
         fwd.addFlags(MsgFlags::FROM_CHILD);
         auto pkt = fwd.build();
         sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&parent_addr_, sizeof(parent_addr_));
-        ot_parent_.insert(*name);
+        ot_parent_.insert(sub_key);
     }
 }
 
+// ============================================================
+// PUBLISH
+// ============================================================
 void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct sockaddr_in& client) {
     auto name = msg.getServiceName();
     if (!name) return;
@@ -201,22 +321,28 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
     cp.lat = pub_lat;
     cp.lon = pub_lon;
     cp.raw_message.assign(msg.getRawData(), msg.getRawData() + msg.getRawSize());
-    pub_cache[*name].push_back(std::move(cp));
+    
+    // Phase 3: Determine pub_key
+    auto bval_n_opt = msg.getBlindedValue();
+    std::string pub_key = (bval_n_opt && he_enabled_) ? *bval_n_opt : *name;
+    
+    pub_cache[pub_key].push_back(std::move(cp));
 
     constexpr size_t MAX_PUB_CACHE = 10;
-    if (pub_cache[*name].size() > MAX_PUB_CACHE) {
-        pub_cache[*name].erase(pub_cache[*name].begin());
+    if (pub_cache[pub_key].size() > MAX_PUB_CACHE) {
+        pub_cache[pub_key].erase(pub_cache[pub_key].begin());
     }
 
     // 2. 向上传播
     if (has_parent_ && !from_parent) {
-        if (brakeAllows(*name, pub_lat, pub_lon)) {
+        if (brakeAllows(pub_key, pub_lat, pub_lon)) {
             TlvMessageBuilder fwd(MsgType::PUBLISH);
-            fwd.addServiceName(*name);
+            fwd.addServiceName(pub_key);
             fwd.addCoordinates(pub_lat, pub_lon);
             if (msg.getPayload() && msg.getPayloadSize() > 0) {
                 fwd.setPayload(msg.getPayload(), msg.getPayloadSize());
             }
+            if (bval_n_opt) fwd.addBlindedValue(*bval_n_opt); // Propagate blinded value
             fwd.addFlags(MsgFlags::FROM_CHILD);
             auto pkt = fwd.build();
             sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&parent_addr_, sizeof(parent_addr_));
@@ -227,7 +353,7 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
     }
 
     // 3. 向下传播
-    auto child_it = child_active_.find(*name);
+    auto child_it = child_active_.find(pub_key);
     if (child_it != child_active_.end()) {
         for (const auto& child_id : child_it->second) {
             if (child_id == from_id) continue;
@@ -242,11 +368,12 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
             if (dist < child.closest_quad[q]) {
                 child.closest_quad[q] = dist;
                 TlvMessageBuilder fwd(MsgType::PUBLISH);
-                fwd.addServiceName(*name);
+                fwd.addServiceName(pub_key);
                 fwd.addCoordinates(pub_lat, pub_lon);
                 if (msg.getPayload() && msg.getPayloadSize() > 0) {
                     fwd.setPayload(msg.getPayload(), msg.getPayloadSize());
                 }
+                if (bval_n_opt) fwd.addBlindedValue(*bval_n_opt);
                 fwd.addFlags(MsgFlags::FROM_PARENT);
                 auto pkt = fwd.build();
                 sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&child.addr, sizeof(child.addr));
@@ -255,26 +382,59 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
         }
     }
 
-    // 4. 本地投递
-    auto it = subscribers.find(*name);
-    if (it == subscribers.end() || it->second.empty()) return;
-
+        // 4. 本地投递
     int delivered = 0;
     const uint8_t* raw = msg.getRawData();
     size_t raw_len = msg.getRawSize();
 
-    for (auto& gc : it->second) {
-        double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
-        if (dist < gc.cached_closest_dist) {
-            sendto(server_fd, raw, raw_len, 0, (const struct sockaddr*)&gc.addr, sizeof(gc.addr));
-            gc.cached_closest_dist = dist;
-            delivered++;
-            stat_delivered_local++;
+    if (he_enabled_ && bval_n_opt) {
+        // Phase 3: 加密匹配模式
+        // 遍历所有订阅组，用 executeMatch 检查是否匹配
+        for (auto& [sub_key, sub_list] : subscribers) {
+            if (sub_list.empty()) continue;
+            
+            const auto& gc0 = sub_list.front();
+            if (gc0.blinded_m1.empty()) continue;
+
+            // 执行同态加密 Match 操作
+            if (!executeMatch(*bval_n_opt, gc0.blinded_m1, gc0.blinded_m2)) {
+                continue; // 不匹配，跳过该组
+            }
+
+            // 匹配成功，投递给该组的所有订阅者
+            for (auto& gc : sub_list) {
+                double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
+                if (dist < gc.cached_closest_dist) {
+                    sendto(server_fd, raw, raw_len, 0, (const struct sockaddr*)&gc.addr, sizeof(gc.addr));
+                    gc.cached_closest_dist = dist;
+                    delivered++;
+                    stat_delivered_local++;
+                }
+            }
+        }
+    } else {
+        // 明文模式 (向后兼容)
+        auto it = subscribers.find(pub_key);
+        if (it == subscribers.end() || it->second.empty()) return;
+
+        for (auto& gc : it->second) {
+            double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
+            if (dist < gc.cached_closest_dist) {
+                sendto(server_fd, raw, raw_len, 0, (const struct sockaddr*)&gc.addr, sizeof(gc.addr));
+                gc.cached_closest_dist = dist;
+                delivered++;
+                stat_delivered_local++;
+            }
         }
     }
 }
 
+// ============================================================
+// Other Handlers (Unchanged from Phase 2)
+// ============================================================
+
 void DnsMulticastBroker::handleHeartbeat(const TlvMessage& msg, const struct sockaddr_in& client) {
+    (void)client;
     auto name = msg.getServiceName();
     if (!name) return;
     last_active[*name] = time(nullptr);
@@ -393,7 +553,7 @@ void DnsMulticastBroker::start() {
     }
 
     struct epoll_event events[MAX_EVENTS];
-    uint8_t buffer[2048];
+    uint8_t buffer[4096]; // Increased buffer size for large blinded values
     struct sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
     time_t last_cleanup = time(nullptr);
