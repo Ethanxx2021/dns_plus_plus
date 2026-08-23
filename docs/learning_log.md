@@ -260,14 +260,60 @@ This validated Algorithm 1's per-subscriber closest filtering: each subscriber i
 
 ---
 
+## Phase 3: Paillier Homomorphic Encryption (July 2025)
+
+### Week 9 — GMP Integration & Original Paillier
+
+**Implementation:**
+- Integrated GMP (GNU Multiple Precision Arithmetic) library for 2048-bit integer operations.
+- Implemented standard Paillier cryptosystem (keygen, encrypt, decrypt, homomorphic addition).
+- Verified homomorphic properties: `D(E(m1)*E(m2)) = m1 + m2`.
+
+### Week 10 — Modified Paillier & Mathematical Gap Discovery
+
+**Critical Discovery:**
+While implementing the modified Paillier (Nabeel 2012 protocol), I discovered a mathematical gap in the DNS++ paper's description. The paper states that multiplying two blinded values yields a "randomized difference," but omits how the broker determines the inequality sign from this masked value.
+
+I traced this back to Nabeel 2012 and found the missing piece: the $n/2$ threshold mechanism. By restricting the value domain ($x, v \in [0, 2^l]$) and using specific blinding parameters ($r_m, r$), the protocol ensures that positive differences fall in $[0, n/2)$ and negative differences fall in $(n/2, n)$. The broker can thus determine the sign by comparing the decrypted difference against $n/2$.
+
+**Implementation:**
+- Implemented key reversal: private key $\lambda$ used for blinding, public key $(n, g, \mu)$ for unblinding.
+- Implemented Nabeel 2012 blinding parameters: $e_m, d_m$ (where $e_m + d_m \equiv 0 \pmod{n}$), $r_m$ (amplification factor).
+- Implemented $n/2$ threshold Match protocol.
+- Verified semantic security: same plaintext produces different blinded values.
+
+### Week 11 — HEPS Service & Broker Integration
+
+**Implementation:**
+- Built HEPS (Homomorphic Encryption Parameter Service) to generate and distribute keys.
+- Extended TLV protocol with `BLINDED_VALUE` and `BLINDED_VALUE_HI` fields.
+- Integrated `executeMatch()` into Broker's routing path, replacing plaintext string comparison.
+- Root broker writes public key to `/tmp/dnspp_heps.key` and full state to `/tmp/dnspp_heps_full.key` for clients.
+
+**Testing:**
+- End-to-end encrypted routing verified: Publisher and Subscriber use HEPS to blind names, Broker successfully matches and routes without learning plaintext.
+
+### Week 12 — Privacy Layer Benchmarks
+
+**Results (10 pubs, 50 subs, brake=4, 5 trials, N=250):**
+- Plaintext latency: 109.18 ± 2.33 ms
+- Encrypted latency: 358.33 ± 8.39 ms
+- Overhead: 3.3x (bounded and measurable)
+- Recall and Stretch: 1.000 for both modes (routing accuracy preserved)
+
+**Conclusion:**
+The core hypothesis is validated: DNS++ can resolve names privately and steer users to the nearest copy on commodity hardware, with the privacy layer adding a bounded, measurable cost of 3.3x latency.
+
+---
+
 ## Technical Glossary
 
 | Term | Definition |
 |------|------------|
 | **Broker** | DNS++ overlay node that routes subscriptions and publications |
 | **MBH** | Minimum Bounding Hyperrectangle — the spatial region managed by a broker |
-| **Brake** | Per-quadrant rate limiter on upward publication propagation (Algorithm 1) |
-| **Quadrant cache** | Per-child, per-quadrant closest-distance cache used to filter downward propagation |
+| **Brake** | Per-quadrant rate limiter on upward publication propagation |
+| **Quadrant cache** | Per-child, per-quadrant closest-distance cache for downward propagation filtering |
 | **Closest cache** | Per-subscriber state tracking the distance of the nearest received publication |
 | **Query mode** | Subscription flag requesting immediate return of cached publications |
 | **IT[]** | Input Table — records subscriptions received from neighbors (per service name) |
@@ -277,10 +323,10 @@ This validated Algorithm 1's per-subscriber closest filtering: each subscriber i
 | **Blinding** | Encryption operation producing semantically secure, non-reversible ciphertexts |
 | **Match** | Homomorphic operation comparing a blinded publication against a blinded subscription |
 | **Cover** | Homomorphic operation comparing two blinded subscriptions for routing table construction |
-| **FPR** | False Positive Ratio — threshold controlling subscription region aggregation (Algorithm 2) |
+| **$n/2$ Threshold** | The mechanism by which a broker determines the sign of a masked difference |
 | **Stretch** | Ratio of actual delivery distance to optimal (ground-truth nearest) distance |
 | **Recall** | Proportion of true closest publications successfully delivered to subscribers |
-| **Traffic Ratio** | Total forwarding events (up + down + local) divided by successful local deliveries |
+| **Traffic Ratio** | Total forwarding events divided by successful local deliveries |
 
 ---
 
