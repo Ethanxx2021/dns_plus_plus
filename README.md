@@ -265,6 +265,49 @@ binary (which would add runtime overhead).
 
 `./build/bench_broker --help` and `./build/bench_multi_broker --help` print the full CLI.
 
+### Run Dynamics Benchmark (replica-migration convergence)
+
+`bench_dynamics` measures how fast subscribers converge to a new closest replica after a
+service replica **migrates** (the "dynamics" axis of the DNS++ motivation). It fills the
+last missing experimental datapoint: the paper's central hypothesis that update latency
+under migration is *seconds, not minutes*.
+
+```bash
+# IMPORTANT: run against a brake-free broker. configs/single.conf has brake_limit=2,
+# which would brake (drop) publications and confound the convergence measurement —
+# the benchmark's stderr will warn "braked>0" in that case. Use brake_limit=1000:
+sed 's/^brake_limit=.*/brake_limit=1000/' configs/single.conf > /tmp/dyn.conf
+./build/dns_broker /tmp/dyn.conf &
+sleep 1
+./build/bench_dynamics 127.0.0.1 8080 20 50 15 1 42 0 --timeout-ms=1000 \
+    > dynamics.csv 2> dynamics.log
+kill %1
+```
+
+Per trial: sample subscribers/publishers with the same uniform lat/lon sampling as
+`bench_broker`, subscribe everyone to one service, publish all replicas once, then run
+`num_migrations` migrations (move one random replica to a new random position and
+re-publish it). For each subscriber whose ground-truth closest replica changed, it
+records whether/when the new closest replica was received.
+
+CSV columns (`stdout`): `trial, migration_idx, sub_id, seed, trial_seed, encrypted,
+old_closest_pub, new_optimal_pub, received_pub, converged, convergence_ms,
+migration_class`. The stderr summary reports per-class convergence rate and
+mean/median/p95/p99 of `convergence_ms`.
+
+Two migration classes are distinguished (this matters for Algorithm 1's per-subscriber
+closest filter, whose `cached_closest_dist` only ever decreases):
+
+- `closer` — the migrated replica became the new closest. It is pushed to the
+  subscriber and convergence time is measurable.
+- `farther` — the previous closest replica moved away, so the true optimum shifts to a
+  *different* replica that was not just published (and may never have been pushed
+  before). Under the current push-only Algorithm 1 these cases may **not converge** —
+  this is a design property, not a bug (see the benchmark's `migration_class` field and
+  the per-class summary).
+
+`./build/bench_dynamics --help` prints the full CLI.
+
 ---
 
 ## Project Structure
@@ -305,7 +348,8 @@ dns_plus_plus/
 │   └── test_brake.cpp         # brake_scope local/upward gating (spawns a broker)
 ├── benchmarks/
 │   ├── bench_broker.cpp       # Single-broker benchmark (plain/encrypted)
-│   └── bench_multi_broker.cpp # Multi-broker benchmark (auto-fork)
+│   ├── bench_multi_broker.cpp # Multi-broker benchmark (auto-fork)
+│   └── bench_dynamics.cpp     # Replica-migration convergence benchmark
 ├── scripts/
 │   ├── plot_results.py        # Phase 1 chart generator
 │   ├── plot_multi_broker.py   # Phase 2 chart generator

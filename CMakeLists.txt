@@ -72,6 +72,16 @@ add_executable(bench_broker
 target_include_directories(bench_broker PRIVATE src /usr/include/x86_64-linux-gnu)
 target_link_libraries(bench_broker PRIVATE gmp gmpxx)
 
+# --- Dynamics Benchmark (replica-migration convergence) ---
+add_executable(bench_dynamics
+    benchmarks/bench_dynamics.cpp
+    src/protocol/TlvMessage.cpp
+    src/crypto/Paillier.cpp
+    src/crypto/Heps.cpp
+)
+target_include_directories(bench_dynamics PRIVATE src /usr/include/x86_64-linux-gnu)
+target_link_libraries(bench_dynamics PRIVATE gmp gmpxx)
+
 # --- Paillier Test ---
 add_executable(test_paillier
     tests/test_paillier.cpp
