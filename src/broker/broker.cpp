@@ -420,7 +420,18 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
     
     // Phase 3: Determine pub_key
     auto bval_n_opt = msg.getBlindedValue();
-    std::string pub_key = (bval_n_opt && he_enabled_) ? hashServiceName(*name) : *name;
+    // 只有「原始」publication(直接来自本地 publisher)才需要把明文服务名哈希成
+    // 分组 key。从 child/parent 转发来的 publication,其 SERVICE_NAME 字段已经是
+    // hashServiceName 的结果(子 broker 在上行/下行转发时填的就是 pub_key),再哈希
+    // 一次会变成双重哈希,导致 child_active_/subscribers(单次哈希)对不上,加密模式
+    // 下跨 broker 的 publication 永远无法向下转发或本地投递。
+    // 明文模式(bval_n 缺失或 he_enabled_=false)不涉及哈希,行为完全不变。
+    std::string pub_key;
+    if (bval_n_opt && he_enabled_ && !from_child && !from_parent) {
+        pub_key = hashServiceName(*name);
+    } else {
+        pub_key = *name;
+    }
     
     pub_cache[pub_key].push_back(std::move(cp));
 

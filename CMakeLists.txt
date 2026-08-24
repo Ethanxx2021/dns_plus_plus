@@ -89,6 +89,17 @@ add_executable(test_heps
 target_include_directories(test_heps PRIVATE src /usr/include/x86_64-linux-gnu)
 target_link_libraries(test_heps PRIVATE gmp gmpxx)
 
+# --- Encrypted Cross-Broker Routing Test (spawns root + leaf dns_broker) ---
+add_executable(test_encrypted_cross_broker
+    tests/test_encrypted_cross_broker.cpp
+    src/protocol/TlvMessage.cpp
+    src/crypto/Paillier.cpp
+    src/crypto/Heps.cpp
+)
+target_include_directories(test_encrypted_cross_broker PRIVATE src /usr/include/x86_64-linux-gnu)
+target_link_libraries(test_encrypted_cross_broker PRIVATE gmp gmpxx)
+add_dependencies(test_encrypted_cross_broker dns_broker)
+
 # --- Multi-Broker Benchmark ---
 # 链接 gmp 是为了 bench_common.h 里读取 gmp_version(运行时 GMP 版本串)打进
 # 环境元数据;bench_multi_broker 自身不涉及任何密码学运算。
