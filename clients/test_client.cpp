@@ -2,10 +2,15 @@
 #include "crypto/Heps.h"
 #include <iostream>
 #include <cstring>
+#include <cstdlib>
+#include <fstream>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <string>
+#include <vector>
+
+static const char* KEY_FILE = "/tmp/dnspp_heps_full.key";
 
 bool recvUdp(int fd, uint8_t* buf, size_t maxlen, size_t& out_len) {
     struct timeval tv;
@@ -20,17 +25,36 @@ bool recvUdp(int fd, uint8_t* buf, size_t maxlen, size_t& out_len) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 4) {
+    // --plaintext / --no-encrypt 可以出现在任意位置；先把它从位置参数里摘出来，
+    // 这样下面的 argc 检查和 argv 下标与原来完全一致。
+    bool encrypt = true;
+    std::vector<std::string> args;
+    args.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; i++) {
+        std::string a = argv[i];
+        if (i > 0 && (a == "--plaintext" || a == "--no-encrypt")) {
+            encrypt = false;
+            continue;
+        }
+        args.push_back(a);
+    }
+    const size_t nargs = args.size();
+
+    if (nargs < 4) {
         std::cout << "Usage:\n"
-                  << "  Subscribe: " << argv[0] << " sub <ip> <port> <service_name> <lat> <lon> [query]\n"
-                  << "  Publish:   " << argv[0] << " pub <ip> <port> <service_name> <lat> <lon> <payload>\n"
-                  << "  Heartbeat: " << argv[0] << " beat <ip> <port> <service_name>\n";
+                  << "  Subscribe: " << args[0] << " sub <ip> <port> <service_name> <lat> <lon> [query]\n"
+                  << "  Publish:   " << args[0] << " pub <ip> <port> <service_name> <lat> <lon> <payload>\n"
+                  << "  Heartbeat: " << args[0] << " beat <ip> <port> <service_name>\n"
+                  << "\n"
+                  << "  --plaintext (alias --no-encrypt): skip homomorphic blinding.\n"
+                  << "      Default is encrypted, which requires " << KEY_FILE << "\n"
+                  << "      (written by the root broker at startup).\n";
         return 1;
     }
 
-    std::string mode = argv[1];
-    std::string broker_ip = argv[2];
-    uint16_t broker_port = static_cast<uint16_t>(std::stoi(argv[3]));
+    std::string mode = args[1];
+    std::string broker_ip = args[2];
+    uint16_t broker_port = static_cast<uint16_t>(std::stoi(args[3]));
 
     struct sockaddr_in broker_addr{};
     broker_addr.sin_family = AF_INET;
@@ -38,24 +62,38 @@ int main(int argc, char* argv[]) {
     inet_pton(AF_INET, broker_ip.c_str(), &broker_addr.sin_addr);
 
     // Initialize HEPS
+    // 加密模式下密钥必须存在：读不到就 fail-fast，不要退回明文，也不要让
+    // Heps::loadState() 留下一组全 0 的参数再在 GMP 里炸掉（CLAUDE.md I6）。
     Heps heps;
-    heps.loadState("/tmp/dnspp_heps_full.key");
+    if (encrypt && mode != "beat") {
+        std::ifstream key_probe(KEY_FILE);
+        if (!key_probe.is_open()) {
+            std::cerr << "FATAL: cannot read HEPS key file " << KEY_FILE << "\n"
+                      << "       start the root broker first (it writes this file), or pass"
+                      << " --plaintext to run without blinding.\n";
+            return EXIT_FAILURE;
+        }
+        key_probe.close();
+        heps.loadState(KEY_FILE);
+    }
 
     if (mode == "sub") {
-        if (argc < 7) { std::cerr << "Need: sub <ip> <port> <name> <lat> <lon> [query]\n"; return 1; }
-        std::string name = argv[4];
-        float lat = std::stof(argv[5]);
-        float lon = std::stof(argv[6]);
-        bool query = (argc >= 8 && std::string(argv[7]) == "query");
+        if (nargs < 7) { std::cerr << "Need: sub <ip> <port> <name> <lat> <lon> [query]\n"; return 1; }
+        std::string name = args[4];
+        float lat = std::stof(args[5]);
+        float lon = std::stof(args[6]);
+        bool query = (nargs >= 8 && args[7] == "query");
 
         TlvMessageBuilder builder(MsgType::SUBSCRIBE);
         builder.addServiceName(name);
         builder.addCoordinates(lat, lon);
         if (query) builder.addFlags(MsgFlags::QUERY_MODE);
 
-        auto [bval_m1, bval_m2] = heps.blindSubscription(name);
-        builder.addBlindedValue(bval_m1);
-        builder.addBlindedValueHi(bval_m2);
+        if (encrypt) {
+            auto [bval_m1, bval_m2] = heps.blindSubscription(name);
+            builder.addBlindedValue(bval_m1);
+            builder.addBlindedValueHi(bval_m2);
+        }
 
         auto pkt = builder.build();
 
@@ -73,7 +111,8 @@ int main(int argc, char* argv[]) {
         sendto(fd, pkt.data(), pkt.size(), 0,
                (struct sockaddr*)&broker_addr, sizeof(broker_addr));
 
-        std::cout << "Sent ENCRYPTED SUBSCRIBE for \"" << name << "\" @ " << lat << "," << lon
+        std::cout << "Sent " << (encrypt ? "ENCRYPTED" : "PLAINTEXT")
+                  << " SUBSCRIBE for \"" << name << "\" @ " << lat << "," << lon
                   << (query ? " (query_mode)" : "") << std::endl;
         std::cout << "Listening for publications..." << std::endl;
 
@@ -106,19 +145,21 @@ int main(int argc, char* argv[]) {
         close(fd);
 
     } else if (mode == "pub") {
-        if (argc < 8) { std::cerr << "Need: pub <ip> <port> <name> <lat> <lon> <payload>\n"; return 1; }
-        std::string name    = argv[4];
-        float lat           = std::stof(argv[5]);
-        float lon           = std::stof(argv[6]);
-        std::string payload = argv[7];
+        if (nargs < 8) { std::cerr << "Need: pub <ip> <port> <name> <lat> <lon> <payload>\n"; return 1; }
+        std::string name    = args[4];
+        float lat           = std::stof(args[5]);
+        float lon           = std::stof(args[6]);
+        std::string payload = args[7];
 
         TlvMessageBuilder builder(MsgType::PUBLISH);
         builder.addServiceName(name);
         builder.addCoordinates(lat, lon);
         builder.setPayload(payload);
 
-        std::string bval_n = heps.blindNotification(name);
-        builder.addBlindedValue(bval_n);
+        if (encrypt) {
+            std::string bval_n = heps.blindNotification(name);
+            builder.addBlindedValue(bval_n);
+        }
 
         auto pkt = builder.build();
 
@@ -127,12 +168,13 @@ int main(int argc, char* argv[]) {
                (struct sockaddr*)&broker_addr, sizeof(broker_addr));
         close(fd);
 
-        std::cout << "Sent ENCRYPTED PUBLISH for \"" << name << "\" @ " << lat << "," << lon
+        std::cout << "Sent " << (encrypt ? "ENCRYPTED" : "PLAINTEXT")
+                  << " PUBLISH for \"" << name << "\" @ " << lat << "," << lon
                   << " payload=\"" << payload << "\"" << std::endl;
 
     } else if (mode == "beat") {
-        if (argc < 5) { std::cerr << "Need: beat <ip> <port> <name>\n"; return 1; }
-        std::string name = argv[4];
+        if (nargs < 5) { std::cerr << "Need: beat <ip> <port> <name>\n"; return 1; }
+        std::string name = args[4];
 
         TlvMessageBuilder builder(MsgType::HEARTBEAT);
         builder.addServiceName(name);
