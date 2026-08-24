@@ -206,35 +206,64 @@ to either command to skip blinding and talk to the broker in plaintext.
 
 ### Run Benchmarks
 
+Benchmarks are **reproducibility-first**: the RNG seed comes from the command line, and
+each trial is seeded with `seed + trial_index` (never one shared seed across all trials,
+which would turn N trials into N identical repetitions and make the standard deviation
+meaningless). Every CSV row carries `seed`, `trial`, and `trial_seed`; a `--warmup=<n>`
+flag (default 3) discards that many rounds before timing so CPU frequency and the
+allocator reach steady state.
+
 ```bash
-# Plaintext vs Encrypted benchmark
-./dns_broker ../configs/single.conf &
+# One-off single-broker run (5 trials, seed 42, 3 warm-up rounds):
+./build/dns_broker configs/single.conf &
 sleep 1
-./bench_broker 127.0.0.1 8080 10 50 4 5 42 0 > plain.csv 2>plain.log
-./bench_broker 127.0.0.1 8080 10 50 4 5 42 1 > encrypted.csv 2>encrypted.log
+./build/bench_broker 127.0.0.1 8080 10 50 4 5 42 0 --warmup=3 > plain.csv 2> plain.log
 kill %1
 
+# New per-row CSV columns (old columns unchanged for backward compatibility):
+#   seed, trial, trial_seed   — reproducibility bookkeeping
+#   latency_ms                — end-to-end, from the FIRST publish sent (retained)
+#   latency_per_pub_ms        — from THIS publish sent to subscriber receipt; strips
+#                               the fixed 10 ms/publisher scheduling interval so it
+#                               doesn't drown the real signal
+```
+
+> **Plaintext vs encrypted must each run against its own fresh broker and do its own
+> warm-up.** A single long-lived broker makes whichever mode runs second inherit a warm
+> broker while the first mode suffers a cold-start outlier. Start a fresh broker for each
+> mode (the `run_full_eval.sh` driver below does exactly this).
+
+```bash
 # Reproducing the brake sweep (single broker)
-# The brake now applies to local delivery when brake_scope is local or both, so a
-# single-broker sweep is once again meaningful. IMPORTANT: brake_limit is a BROKER
-# config value, not a benchmark argument -- bench_broker's brake_limit arg is only
-# written into the CSV, it is NOT sent to the broker (see docs/audit_2026-08.md Q1).
-# To sweep brake_limit you must restart the broker with a different config each time:
+# brake_limit lives in the broker config, NOT on the benchmark CLI (see
+# docs/audit_2026-08.md Q1). Sweep it by restarting the broker per value:
 for L in 1 2 4 1000; do
-  sed "s/^brake_limit=.*/brake_limit=$L/" ../configs/single.conf > /tmp/sweep_$L.conf
-  ./dns_broker /tmp/sweep_$L.conf &          # config has brake_scope=both
+  sed "s/^brake_limit=.*/brake_limit=$L/" configs/single.conf > /tmp/sweep_$L.conf
+  ./build/dns_broker /tmp/sweep_$L.conf &    # config has brake_scope=both
   BPID=$!; sleep 1
-  ./bench_broker 127.0.0.1 8080 10 50 $L 5 42 0 > brake_$L.csv 2> brake_$L.log
+  ./build/bench_broker 127.0.0.1 8080 10 50 $L 5 42 0 --warmup=3 > brake_$L.csv 2> brake_$L.log
   kill $BPID; wait $BPID 2>/dev/null
 done
-# NOTE: the awkward "restart per brake_limit" is a consequence of brake_limit living
-# only in the broker config. Wiring it (and brake_scope) onto the benchmark CLI is
-# left to T6.
+# NOTE: the "restart per brake_limit" awkwardness is a consequence of brake_limit
+# living only in the broker config. Wiring it (and brake_scope) onto the benchmark
+# CLI would require a protocol change and is out of scope here.
 
-# Generate charts
-source ../venv/bin/activate
-python3 ../scripts/plot_crypto.py
+# Full sweep driver: runs all four experiments (single-broker brake sweep,
+# multi-broker brake sweep, subscriber scale sweep, plaintext-vs-encrypted),
+# skips outputs that already exist, and writes env.txt:
+bash scripts/run_full_eval.sh --trials=30 --out=results/rerun
 ```
+
+**Environment & network observability.** Every benchmark writes to stderr: CPU model
+(`/proc/cpuinfo` `model name`), core count, kernel version (`uname -r`), GMP runtime
+version (`gmp_version`), build type (Release/Debug from `NDEBUG`), the delta of
+`/proc/net/snmp` UDP `RcvbufErrors`/`InErrors` across the run (to tell "algorithm
+filtering" from "the kernel dropped the packet"), and the effective `SO_RCVBUF` read
+back via `getsockopt` (set to 4 MiB; Linux doubles it, so the read-back is ~8 MiB).
+The git commit hash is recorded in `env.txt` by the driver rather than embedded in the
+binary (which would add runtime overhead).
+
+`./build/bench_broker --help` and `./build/bench_multi_broker --help` print the full CLI.
 
 ---
 

@@ -1,10 +1,25 @@
+// benchmarks/bench_multi_broker.cpp
+//
+// Multi-broker benchmark: fork a 3-broker tree (root + 2 leaves), run N trials,
+// each trial against a FRESH set of brokers (CLAUDE.md 不变量 I9:复用 broker 会污染
+// sub_groups 累计计数器), and emit per-subscriber CSV + per-trial stderr summary.
+//
+// Usage:
+//   ./bench_multi_broker <num_pubs> <num_subs> <brake_limit> <num_trials> [seed]
+//                        [--warmup=<n>]
+//
+// Reproducibility:同 bench_broker,每个 trial 用 srand(seed + trial_index) 独立播种,
+// seed / trial / trial_seed 写进 CSV 每一行。warm-up 轮用独立种子域并丢弃结果。
+
 #include "protocol/TlvMessage.h"
 #include "utils/geo.h"
+#include "bench_common.h"
 #include <iostream>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <cstdint>
 #include <cmath>
 #include <chrono>
 #include <thread>
@@ -15,6 +30,14 @@
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <endian.h>
+
+namespace {
+
+constexpr int kSubscriberRcvBuf = 4 * 1024 * 1024;   // 4 MiB,同 bench_broker
+constexpr uint32_t kWarmupSeedOffset = 0x10000000u;  // warm-up 种子域偏移
+constexpr int kDefaultWarmup = 3;
+
+} // namespace
 
 struct BrokerInfo {
     std::string id;
@@ -75,20 +98,76 @@ void killBroker(pid_t pid) {
     waitpid(pid, nullptr, 0);
 }
 
+void printUsage(const char* argv0) {
+    std::cerr << "Usage: " << argv0
+              << " <num_pubs> <num_subs> <brake_limit> <num_trials> [seed]"
+              << " [--warmup=<n>]\n"
+              << "\n"
+              << "  seed         RNG seed (default 42). Each trial uses srand(seed + trial_index).\n"
+              << "  brake_limit  written into each forked broker's config (per-quadrant limit).\n"
+              << "  --warmup=<n> number of discarded warm-up rounds before timing (default "
+              << kDefaultWarmup << ").\n";
+}
+
 int main(int argc, char* argv[]) {
-    if (argc < 5) {
-        std::cerr << "Usage: " << argv[0] << " <num_pubs> <num_subs> <brake_limit> <num_trials> [seed]" << std::endl;
+    // ---- CLI 解析:positional 向后兼容,--warmup=<n> 新增 ----
+    int warmup = kDefaultWarmup;
+    std::vector<std::string> pos;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "--help" || a == "-h") {
+            printUsage(argv[0]);
+            return 0;
+        } else if (a.rfind("--warmup=", 0) == 0) {
+            warmup = std::atoi(a.c_str() + strlen("--warmup="));
+            if (warmup < 0) {
+                std::cerr << "FATAL: --warmup must be >= 0, got \"" << a << "\"" << std::endl;
+                return EXIT_FAILURE;
+            }
+        } else {
+            pos.push_back(a);
+        }
+    }
+
+    if (pos.size() < 4) {
+        printUsage(argv[0]);
         return 1;
     }
 
-    int num_pubs    = std::atoi(argv[1]);
-    int num_subs    = std::atoi(argv[2]);
-    int brake_limit = std::atoi(argv[3]);
-    int num_trials  = std::atoi(argv[4]);
-    uint32_t seed   = (argc >= 6) ? static_cast<uint32_t>(std::atoi(argv[5])) : 42;
+    int num_pubs    = std::atoi(pos[0].c_str());
+    int num_subs    = std::atoi(pos[1].c_str());
+    int brake_limit = std::atoi(pos[2].c_str());
+    int num_trials  = std::atoi(pos[3].c_str());
+    uint32_t seed   = (pos.size() >= 5) ? static_cast<uint32_t>(std::atoi(pos[4].c_str())) : 42;
 
-    srand(seed);
-    std::string broker_bin = "./dns_broker";
+    if (num_pubs <= 0 || num_subs <= 0 || num_trials <= 0) {
+        std::cerr << "FATAL: num_pubs/num_subs/num_trials must be > 0" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    bench::printEnvironment();
+    std::cerr << "[bench-run] num_pubs=" << num_pubs << " num_subs=" << num_subs
+              << " brake_limit=" << brake_limit << " num_trials=" << num_trials
+              << " seed=" << seed << " warmup=" << warmup << std::endl;
+
+    bench::UdpSnmp snmp_start = bench::readUdpSnmp();
+    if (!snmp_start.valid) {
+        std::cerr << "[bench-net] WARNING: could not read /proc/net/snmp (Udp) at start; "
+                     "RcvbufErrors/InErrors deltas will be unavailable" << std::endl;
+    }
+
+    // broker 二进制路径:benchmark 可能在仓库根目录(./build/dns_broker)或 build 目录
+    // 内(./dns_broker)运行。旧的硬编码 "./dns_broker" 在仓库根下 execl 会静默失败、
+    // 产出 recall 恒为 0 的假数据(CLAUDE.md:不静默降级)。两个候选都找不到就 fail-fast。
+    std::string broker_bin;
+    for (const char* c : {"./dns_broker", "./build/dns_broker"}) {
+        if (access(c, X_OK) == 0) { broker_bin = c; break; }
+    }
+    if (broker_bin.empty()) {
+        std::cerr << "FATAL: cannot find dns_broker binary (tried ./dns_broker, ./build/dns_broker). "
+                  << "Run from the repository root or the build directory." << std::endl;
+        return EXIT_FAILURE;
+    }
 
     std::vector<BrokerInfo> brokers = {
         {"broker_root",  9000, 0.0f, 0.0f, "/tmp/dnspp_root.conf"},
@@ -100,13 +179,18 @@ int main(int argc, char* argv[]) {
     createBrokerConfig(brokers[1].config_file, brokers[1].id, brokers[1].port, "127.0.0.1:9000", brokers[1].lat, brokers[1].lon, brake_limit);
     createBrokerConfig(brokers[2].config_file, brokers[2].id, brokers[2].port, "127.0.0.1:9000", brokers[2].lat, brokers[2].lon, brake_limit);
 
-    std::cout << "trial,num_pubs,num_subs,brake_limit,sub_id,sub_lat,sub_lon,"
+    std::cout << "seed,trial,trial_seed,num_pubs,num_subs,brake_limit,sub_id,sub_lat,sub_lon,"
               << "sub_broker,optimal_pub_id,optimal_dist,received,received_pub_id,"
               << "received_dist,stretch,recall" << std::endl;
 
-    for (int t = 0; t < num_trials; t++) {
-        std::string service = "mbench_" + std::to_string(t);
+    bool rcvbuf_reported = false;
+    int round = 0;
 
+    auto runTrial = [&](uint32_t trial_seed, int trial_index, bool emit) {
+        srand(trial_seed);
+        std::string service = "mbench_" + std::to_string(round++);
+
+        // I9:每个 trial 起全新的 broker 进程,绝不复用上一轮的 broker。
         pid_t root_pid  = startBroker(broker_bin, brokers[0].config_file, 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         pid_t leaf1_pid = startBroker(broker_bin, brokers[1].config_file, 1);
@@ -151,6 +235,14 @@ int main(int argc, char* argv[]) {
             addr.sin_addr.s_addr = INADDR_ANY;
             addr.sin_port = 0;
             bind(s.fd, (struct sockaddr*)&addr, sizeof(addr));
+
+            int actual = bench::setSubscriberRcvBuf(s.fd, kSubscriberRcvBuf);
+            if (!rcvbuf_reported) {
+                std::cerr << "[bench-net] subscriber_so_rcvbuf requested=" << kSubscriberRcvBuf
+                          << " actual=" << actual
+                          << (actual < 0 ? " (getsockopt FAILED)" : "") << std::endl;
+                rcvbuf_reported = true;
+            }
 
             struct sockaddr_in broker_addr{};
             broker_addr.sin_family = AF_INET;
@@ -234,18 +326,23 @@ int main(int argc, char* argv[]) {
             if (recall) total_recall++;
             if (s.received) { total_stretch += stretch; total_received++; }
 
-            std::cout << t << "," << num_pubs << "," << num_subs << "," << brake_limit << ","
-                      << s.id << "," << s.lat << "," << s.lon << ","
-                      << s.broker_idx << "," << s.optimal_pub_id << "," << s.optimal_dist << ","
-                      << (s.received ? 1 : 0) << "," << s.received_pub_id << ","
-                      << (s.received ? s.received_dist : -1.0) << ","
-                      << stretch << "," << (recall ? 1 : 0) << std::endl;
+            if (emit) {
+                std::cout << seed << "," << trial_index << "," << trial_seed << ","
+                          << num_pubs << "," << num_subs << "," << brake_limit << ","
+                          << s.id << "," << s.lat << "," << s.lon << ","
+                          << s.broker_idx << "," << s.optimal_pub_id << "," << s.optimal_dist << ","
+                          << (s.received ? 1 : 0) << "," << s.received_pub_id << ","
+                          << (s.received ? s.received_dist : -1.0) << ","
+                          << stretch << "," << (recall ? 1 : 0) << std::endl;
+            }
         }
 
         double avg_recall = static_cast<double>(total_recall) / subs.size();
         double avg_stretch = (total_received > 0) ? total_stretch / total_received : -1.0;
 
-        // --- Query traffic stats from all brokers ---
+        // --- Query traffic stats from all brokers (必须在 killBroker 之前) ---
+        // warm-up 轮(emit=false)跳过统计与 summary,只做下面的关闭/清理。
+        if (emit) {
         uint64_t total_up = 0, total_down = 0, total_local = 0, total_braked = 0;
         // STATS_DATA_EXT (TLV 0x0007) 的累计量与每 broker 快照量。
         // 解析它只需要 TlvMessage + endian.h，不引入任何密码学依赖。
@@ -316,11 +413,11 @@ int main(int argc, char* argv[]) {
         uint64_t total_traffic = total_up + total_down + total_local;
         double traffic_ratio = (total_local > 0) ? (double)total_traffic / total_local : 0.0;
 
-        std::cerr << "Trial " << t << ": recall=" << avg_recall
+        std::cerr << "Trial " << trial_index << ": recall=" << avg_recall
                   << " avg_stretch=" << avg_stretch
                   << " delivered=" << total_received << "/" << subs.size()
-                  << " | Traffic: up=" << total_up << " down=" << total_down 
-                  << " local=" << total_local << " braked=" << total_braked 
+                  << " | Traffic: up=" << total_up << " down=" << total_down
+                  << " local=" << total_local << " braked=" << total_braked
                   << " | Traffic Ratio=" << traffic_ratio << std::endl;
 
         // Broker 侧计数器。3 个 broker 全部应答才算完整；缺一个都必须看得出来。
@@ -339,15 +436,39 @@ int main(int argc, char* argv[]) {
                   << "] he_mode=["
                   << ext_he_mode[0] << "," << ext_he_mode[1] << "," << ext_he_mode[2]
                   << "]  (-1 = no STATS_DATA_EXT in response)" << std::endl;
+        } // if (emit)
 
         for (auto& s : subs) {
             if (s.fd >= 0) close(s.fd);
         }
-
         killBroker(leaf1_pid);
         killBroker(leaf2_pid);
         killBroker(root_pid);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    };
+
+    // ---- warm-up ----
+    for (int w = 0; w < warmup; w++) {
+        runTrial(seed + kWarmupSeedOffset + static_cast<uint32_t>(w), -1, false);
+    }
+
+    // ---- 正式 trial ----
+    for (int t = 0; t < num_trials; t++) {
+        uint32_t trial_seed = seed + static_cast<uint32_t>(t);
+        runTrial(trial_seed, t, true);
+    }
+
+    // ---- UDP 丢包统计 ----
+    bench::UdpSnmp snmp_end = bench::readUdpSnmp();
+    if (snmp_start.valid && snmp_end.valid) {
+        std::cerr << "[bench-net] udp_rcvbuf_errors_delta="
+                  << (snmp_end.rcvbuf_errors - snmp_start.rcvbuf_errors)
+                  << " udp_in_errors_delta="
+                  << (snmp_end.in_errors - snmp_start.in_errors)
+                  << " (start: rcvbuf=" << snmp_start.rcvbuf_errors
+                  << " inerr=" << snmp_start.in_errors
+                  << "; end: rcvbuf=" << snmp_end.rcvbuf_errors
+                  << " inerr=" << snmp_end.in_errors << ")" << std::endl;
     }
 
     return 0;

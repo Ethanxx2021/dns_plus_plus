@@ -90,11 +90,14 @@ target_include_directories(test_heps PRIVATE src /usr/include/x86_64-linux-gnu)
 target_link_libraries(test_heps PRIVATE gmp gmpxx)
 
 # --- Multi-Broker Benchmark ---
+# 链接 gmp 是为了 bench_common.h 里读取 gmp_version(运行时 GMP 版本串)打进
+# 环境元数据;bench_multi_broker 自身不涉及任何密码学运算。
 add_executable(bench_multi_broker
     benchmarks/bench_multi_broker.cpp
     src/protocol/TlvMessage.cpp
 )
-target_include_directories(bench_multi_broker PRIVATE src)
+target_include_directories(bench_multi_broker PRIVATE src /usr/include/x86_64-linux-gnu)
+target_link_libraries(bench_multi_broker PRIVATE gmp)
 
 add_executable(test_crypto_microbench
     tests/test_crypto_microbench.cpp
