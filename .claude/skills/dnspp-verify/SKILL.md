@@ -38,6 +38,10 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j 2>&1 | tail 
 for t in test_tlv test_geo test_paillier test_heps; do
   echo "=== $t ==="; ./build/$t || echo "FAILED: $t";
 done
+
+# test_brake 会 fork 一个真实 dns_broker 子进程（验证 brake_scope 的本地/上行限流），
+# 所以单列，并显式传入 broker 二进制路径：
+./build/test_brake ./build/dns_broker || echo "FAILED: test_brake"
 ```
 
 `test_paillier` 和 `test_heps` 会做 2048 位密钥生成,单次可能要几十秒,属正常。

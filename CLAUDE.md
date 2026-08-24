@@ -51,7 +51,7 @@ src/
 benchmarks/
   bench_broker.cpp         # 单 broker 实验
   bench_multi_broker.cpp   # 多 broker 实验(fork 三个 broker)
-tests/                     # test_tlv / test_geo / test_paillier / test_heps
+tests/                     # test_tlv / test_geo / test_paillier / test_heps / test_brake
 scripts/                   # 集成测试与绘图
 config/                    # root.conf / leaf1.conf / leaf2.conf
 results/                   # 实验数据 CSV 与图表
@@ -69,7 +69,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
 # 单元测试(每一次改动后都必须全绿)
-./build/test_tlv && ./build/test_geo && ./build/test_paillier && ./build/test_heps
+./build/test_tlv && ./build/test_geo && ./build/test_paillier && ./build/test_heps \
+  && ./build/test_brake ./build/dns_broker   # test_brake 会 fork 一个真实 broker，需先构建 dns_broker
 
 # 单 broker 集成测试
 bash scripts/run_integration_test.sh

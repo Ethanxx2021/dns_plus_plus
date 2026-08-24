@@ -43,7 +43,7 @@ BrokerConfig parseConfig(const std::string& filename) {
     cfg.parent_addr = "";
     cfg.lat = 0.0f;
     cfg.lon = 0.0f;
-    // brake_limit / brake_window 是可选字段；下面这两个默认值会在启动日志里打印出来，
+    // brake_limit / brake_window / brake_scope 是可选字段；默认值会在启动日志里打印出来，
     // 所以它们是「可见的默认」而不是「静默的默认」。
     cfg.brake_limit = 2;
     cfg.brake_window_sec = 10;
@@ -121,6 +121,15 @@ BrokerConfig parseConfig(const std::string& filename) {
             }
             cfg.brake_window_sec = window;
         }
+        else if (key == "brake_scope") {
+            // 必须在这里注册，否则解析器会把 brake_scope 当未知 key 而 fail-fast，
+            // 使所有带该字段的配置文件（本次给五个配置都加了）无法启动。
+            if      (val == "upward") cfg.brake_scope = BrakeScope::Upward;
+            else if (val == "local")  cfg.brake_scope = BrakeScope::Local;
+            else if (val == "both")   cfg.brake_scope = BrakeScope::Both;
+            else configError(filename, "brake_scope=\"" + val +
+                             "\" must be one of: upward | local | both");
+        }
         else {
             // 未知 key 与拼错的 key 无法区分，静默忽略等于静默降级
             configError(filename, "line " + std::to_string(lineno) + ": unknown key \"" + key + "\"");
@@ -148,8 +157,12 @@ int main(int argc, char* argv[]) {
     std::cout << "  Port: " << cfg.listen_port << std::endl;
     std::cout << "  Coords: " << cfg.lat << "," << cfg.lon << std::endl;
     std::cout << "  Parent: " << (cfg.parent_addr.empty() ? "(none — ROOT)" : cfg.parent_addr) << std::endl;
+    const char* scope_str =
+        (cfg.brake_scope == BrakeScope::Upward) ? "upward" :
+        (cfg.brake_scope == BrakeScope::Local)  ? "local"  : "both";
     std::cout << "  Brake: limit=" << cfg.brake_limit
-              << " window=" << cfg.brake_window_sec << "s" << std::endl;
+              << " window=" << cfg.brake_window_sec << "s"
+              << " scope=" << scope_str << std::endl;
 
     DnsMulticastBroker broker(cfg);
     broker.start();

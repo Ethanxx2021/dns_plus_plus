@@ -91,12 +91,16 @@ DnsMulticastBroker::DnsMulticastBroker(const BrokerConfig& config)
 
     // 运行模式声明：一行就能确认这次跑的到底是不是加密模式、brake 参数是多少。
     // 没有这一行，「加密实验静默退回明文」在输出里是看不出来的（CLAUDE.md I5）。
+    const char* scope_str =
+        (config_.brake_scope == BrakeScope::Upward) ? "upward" :
+        (config_.brake_scope == BrakeScope::Local)  ? "local"  : "both";
     std::stringstream mode;
     mode << "[Broker " << config_.broker_id << "] MODE"
          << " he_enabled=" << (he_enabled_ ? 1 : 0)
          << " has_parent=" << (has_parent_ ? 1 : 0)
          << " brake_limit=" << config_.brake_limit
-         << " brake_window=" << config_.brake_window_sec << "s";
+         << " brake_window=" << config_.brake_window_sec << "s"
+         << " brake_scope=" << scope_str;
     logger.pushLog(mode.str());
 
     if (he_enabled_) {
@@ -213,9 +217,10 @@ int DnsMulticastBroker::getQuadrant(float lat, float lon) const {
         return (lon >= 0.0f) ? 2 : 3;
 }
 
-bool DnsMulticastBroker::brakeAllows(const std::string& service, float lat, float lon) {
+bool DnsMulticastBroker::brakeAllows(BrakeDir dir, const std::string& service, float lat, float lon) {
     int q = getQuadrant(lat, lon);
-    auto& queue = brake_count[service][q];
+    auto& windows = (dir == BrakeDir::Up) ? brake_count_up_ : brake_count_local_;
+    auto& queue = windows[service][q];
     time_t now = time(nullptr);
 
     while (!queue.empty() && (now - queue.front() > config_.brake_window_sec)) {
@@ -223,8 +228,9 @@ bool DnsMulticastBroker::brakeAllows(const std::string& service, float lat, floa
     }
 
     if (static_cast<int>(queue.size()) >= config_.brake_limit) {
-        // 在这里计数而不是在调用点：调用点漏写 else 分支时计数器会静默失真。
-        stat_braked++;
+        // 在这里按方向计数：调用点漏写计数会静默失真（T1 的教训）。
+        if (dir == BrakeDir::Up) stat_braked_up++;
+        else                     stat_braked_local++;
         return false;
     }
 
@@ -369,9 +375,11 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
         pub_cache[pub_key].erase(pub_cache[pub_key].begin());
     }
 
-    // 2. 向上传播
+    // 2. 向上传播（brake_scope 为 upward 或 both 时受 brake 限流）
+    bool brake_upward = (config_.brake_scope == BrakeScope::Upward ||
+                         config_.brake_scope == BrakeScope::Both);
     if (has_parent_ && !from_parent) {
-        if (brakeAllows(pub_key, pub_lat, pub_lon)) {
+        if (!brake_upward || brakeAllows(BrakeDir::Up, pub_key, pub_lat, pub_lon)) {
             TlvMessageBuilder fwd(MsgType::PUBLISH);
             fwd.addServiceName(pub_key);
             fwd.addCoordinates(pub_lat, pub_lon);
@@ -384,7 +392,7 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
             sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&parent_addr_, sizeof(parent_addr_));
             stat_forward_up++;
         }
-        // brake 拒绝的情况已经在 brakeAllows() 内部计入 stat_braked
+        // 上行 brake 拒绝的情况已在 brakeAllows(Up) 内部计入 stat_braked_up
     }
 
     // 3. 向下传播
@@ -420,6 +428,18 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
     // 4. 本地投递
     auto it = subscribers.find(pub_key);
     if (it == subscribers.end() || it->second.empty()) return;
+
+    // 本地投递 brake 门（brake_scope 为 local 或 both 时生效）。
+    // 位置很关键：必须在「pub_cache 已缓存之后」——query_mode 依赖那份缓存，
+    // 不能因为被 brake 拦截就不缓存（缓存在本函数前面已完成）。也必须在
+    // 「确认存在订阅者之后」——没有订阅者时本地不投递，也就无所谓限流，这与
+    // Phase 1 (commit b79ea7b) 的原始语义一致。
+    bool brake_local = (config_.brake_scope == BrakeScope::Local ||
+                        config_.brake_scope == BrakeScope::Both);
+    if (brake_local && !brakeAllows(BrakeDir::Local, pub_key, pub_lat, pub_lon)) {
+        // 被本地 brake 拦下：不投递（stat_braked_local 已在 brakeAllows 内自增）
+        return;
+    }
 
     int delivered = 0;
     const uint8_t* raw = msg.getRawData();
@@ -551,7 +571,9 @@ void DnsMulticastBroker::handleStatsRequest(const struct sockaddr_in& client) {
     uint64_t net_up = htobe64(stat_forward_up);
     uint64_t net_down = htobe64(stat_forward_down);
     uint64_t net_local = htobe64(stat_delivered_local);
-    uint64_t net_braked = htobe64(stat_braked);
+    // 合计值保留在旧字段里（up + local），旧解析代码看到的语义不变
+    uint64_t stat_braked_total = stat_braked_up + stat_braked_local;
+    uint64_t net_braked = htobe64(stat_braked_total);
     
     std::memcpy(stats_buf, &net_up, 8);
     std::memcpy(stats_buf + 8, &net_down, 8);
@@ -560,28 +582,33 @@ void DnsMulticastBroker::handleStatsRequest(const struct sockaddr_in& client) {
     
     resp.addTlv(TlvType::STATS_DATA, stats_buf, 32);
 
-    // --- 新的 80 字节 STATS_DATA_EXT (0x0007)，10 个 big-endian uint64 ---
-    // 顺序必须与 README「TLV Field Types」表一致：
+    // --- 新的 96 字节 STATS_DATA_EXT (0x0007)，12 个 big-endian uint64 ---
+    // 顺序必须与 README「TLV Field Types」表一致。索引 0-9 与 T1 完全相同（其中
+    // 索引 3 的 braked 是合计 = braked_up + braked_local，向后兼容 T1 的解析代码），
+    // T3 在末尾追加索引 10/11 给出上行/本地的拆分：
     // forward_up, forward_down, delivered_local, braked,
-    // match_calls, match_hits, pub_received, sub_received, sub_groups, he_mode
-    const uint64_t ext_values[10] = {
+    // match_calls, match_hits, pub_received, sub_received, sub_groups, he_mode,
+    // braked_up, braked_local
+    const uint64_t ext_values[12] = {
         stat_forward_up,
         stat_forward_down,
         stat_delivered_local,
-        stat_braked,
+        stat_braked_total,
         stat_match_calls,
         stat_match_hits,
         stat_pub_received,
         stat_sub_received,
         stat_sub_groups,
-        stat_he_mode
+        stat_he_mode,
+        stat_braked_up,
+        stat_braked_local
     };
-    uint8_t ext_buf[80];
-    for (size_t i = 0; i < 10; i++) {
+    uint8_t ext_buf[96];
+    for (size_t i = 0; i < 12; i++) {
         uint64_t be = htobe64(ext_values[i]);
         std::memcpy(ext_buf + i * 8, &be, 8);
     }
-    resp.addTlv(TlvType::STATS_DATA_EXT, ext_buf, 80);
+    resp.addTlv(TlvType::STATS_DATA_EXT, ext_buf, 96);
 
     auto pkt = resp.build();
     sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&client, sizeof(client));
@@ -594,7 +621,8 @@ void DnsMulticastBroker::cleanupExpired() {
         if (now - last_active[name] > TTL_SECONDS) {
             last_active.erase(name);
             pub_cache.erase(name);
-            brake_count.erase(name);
+            brake_count_up_.erase(name);
+            brake_count_local_.erase(name);
             it = subscribers.erase(it);
         } else {
             ++it;
