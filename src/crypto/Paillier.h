@@ -6,6 +6,7 @@
 
 class Paillier {
 public:
+    Paillier();
     // Key Generation
     void keyGen(unsigned int bits = 2048);
 
@@ -43,6 +44,12 @@ private:
 
     mpz_class e_m, d_m;
     mpz_class r_m;
+
+    // RNG 只在构造时用 std::random_device 播种一次，避免旧代码在 encrypt() /
+    // blindNotification() / keyGen() 里每次重新构造 + 重新播种（既慢又是随机性
+    // 隐患，见审计报告顺带发现 7）。mutable 是因为 encrypt() / blindNotification()
+    // 等按语义是 const 但内部要抽随机数。
+    mutable gmp_randclass rng_;
 
     mpz_class L(const mpz_class& x) const;
 };

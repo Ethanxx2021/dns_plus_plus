@@ -53,6 +53,7 @@ void createBrokerConfig(const std::string& filename, const std::string& id,
     fprintf(f, "brake_limit=%d\n", brake_limit);
     fprintf(f, "brake_window=10\n");
     fprintf(f, "brake_scope=both\n");
+    fprintf(f, "require_he=false\n");
     fclose(f);
 }
 

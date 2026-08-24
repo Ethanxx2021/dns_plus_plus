@@ -65,6 +65,10 @@ struct BrokerConfig {
     int brake_limit;
     time_t brake_window_sec;
     BrakeScope brake_scope = BrakeScope::Both;
+    // require_he=true 时 leaf broker 读不到密钥必须 fail-fast，禁止退化为明文。
+    // 默认 false 保留旧行为（打印 WARNING 后退化），是为了不破坏现有测试脚本；
+    // 学术实验请显式 require_he=true 以防止「加密实验静默变成明文实验」。
+    bool require_he = false;
 };
 
 class DnsMulticastBroker {

@@ -121,6 +121,13 @@ BrokerConfig parseConfig(const std::string& filename) {
             }
             cfg.brake_window_sec = window;
         }
+        else if (key == "require_he") {
+            // 必须在此注册，否则 fail-fast 解析器会把 require_he 当未知 key 而退出。
+            if      (val == "true"  || val == "1") cfg.require_he = true;
+            else if (val == "false" || val == "0") cfg.require_he = false;
+            else configError(filename, "require_he=\"" + val +
+                             "\" must be true|false (or 1|0)");
+        }
         else if (key == "brake_scope") {
             // 必须在这里注册，否则解析器会把 brake_scope 当未知 key 而 fail-fast，
             // 使所有带该字段的配置文件（本次给五个配置都加了）无法启动。
@@ -163,6 +170,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  Brake: limit=" << cfg.brake_limit
               << " window=" << cfg.brake_window_sec << "s"
               << " scope=" << scope_str << std::endl;
+    std::cout << "  require_he: " << (cfg.require_he ? "true" : "false") << std::endl;
 
     DnsMulticastBroker broker(cfg);
     broker.start();
