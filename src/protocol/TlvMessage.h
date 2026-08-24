@@ -31,6 +31,7 @@ enum class TlvType : uint16_t {
     BRAKE_LIMIT      = 0x0004,
     REGION           = 0x0005,
     STATS_DATA       = 0x0006,
+    STATS_DATA_EXT   = 0x0007,   // 80 bytes: 10 x uint64_t (big-endian), see README
     BLINDED_VALUE    = 0x0010,
     BLINDED_VALUE_HI = 0x0011,
     BLINDED_COVER    = 0x0012,

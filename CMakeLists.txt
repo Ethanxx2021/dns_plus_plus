@@ -5,6 +5,20 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
 
+# --- Sanitizers ---
+# 之前 -DENABLE_ASAN=ON 会报 "Manually-specified variables were not used by the
+# project"，因为这个选项从未被定义 —— 所谓的 ASan 构建其实是普通 Debug 构建。
+# 这里用 CMAKE_CXX_FLAGS / CMAKE_EXE_LINKER_FLAGS 而不是 add_link_options()，
+# 因为后者需要 CMake 3.13，而本项目声明的最低版本是 3.10。
+# 必须放在所有 add_executable() 之前，才能作用于全部 target。
+option(ENABLE_ASAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_ASAN)
+    set(SANITIZER_FLAGS "-fsanitize=address,undefined -fno-omit-frame-pointer")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+    message(STATUS "ENABLE_ASAN=ON -> ${SANITIZER_FLAGS}")
+endif()
+
 # --- Broker ---
 add_executable(dns_broker
     src/main.cpp

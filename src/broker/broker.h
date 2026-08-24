@@ -88,11 +88,24 @@ private:
     uint64_t stat_delivered_local = 0;
     uint64_t stat_braked = 0;
 
+    // 可观测性计数器（CLAUDE.md I5：加密模式必须可观测）。
+    // match_calls/match_hits 在 executeMatch() 内部自增，而 executeMatch() 是 const，
+    // 所以这两个必须是 mutable —— 放在调用点计数会在新增调用点时静默漏计。
+    mutable uint64_t stat_match_calls = 0;
+    mutable uint64_t stat_match_hits = 0;
+    uint64_t stat_pub_received = 0;
+    uint64_t stat_sub_received = 0;
+    // 下面两个不是累加计数器，而是快照量：在 handleStatsRequest() 里从实时状态
+    // 重新取值，避免与真实状态漂移。
+    uint64_t stat_sub_groups = 0;
+    uint64_t stat_he_mode = 0;
+
     // ---------- Phase 3: Encrypted Matching ----------
     mpz_class he_n_;
     mpz_class he_mu_;
     mpz_class he_n_sq_;
     bool he_enabled_ = false;
+    std::string he_key_source_;   // 启动日志用：密钥是自己生成的还是从文件加载的
 
     bool executeMatch(const std::string& bval_n_hex, 
                       const std::string& bval_m1_hex, 

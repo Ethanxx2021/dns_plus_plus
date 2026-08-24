@@ -192,7 +192,13 @@ std::vector<uint8_t> TlvMessageBuilder::build() const {
     std::memcpy(buf.data() + 4, &net_payload, 4);
 
     // TLV fields
-    std::memcpy(buf.data() + 8, tlv_bytes_.data(), tlv_bytes_.size());
+    // 空 vector 的 .data() 允许返回 nullptr，而 memcpy 的实参被声明为 nonnull，
+    // 即使 size 为 0 也是 UB（UBSan 会报 "null pointer passed as argument 2"）。
+    // 下面 payload 那段本来就有同样的保护，这里补齐。
+    // 触发路径：不带任何 TLV 字段的消息，例如 STATS_REQUEST。
+    if (!tlv_bytes_.empty()) {
+        std::memcpy(buf.data() + 8, tlv_bytes_.data(), tlv_bytes_.size());
+    }
 
     // Payload
     if (!payload_.empty()) {

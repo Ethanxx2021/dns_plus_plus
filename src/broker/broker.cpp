@@ -11,6 +11,7 @@
 #include <endian.h>
 #include <gmpxx.h>
 #include <fstream>
+#include <functional>
 #include "crypto/Paillier.h"
 
 #define MAX_EVENTS 10
@@ -87,6 +88,31 @@ DnsMulticastBroker::DnsMulticastBroker(const BrokerConfig& config)
         ss << " (HE Enabled)";
     }
     logger.pushLog(ss.str());
+
+    // 运行模式声明：一行就能确认这次跑的到底是不是加密模式、brake 参数是多少。
+    // 没有这一行，「加密实验静默退回明文」在输出里是看不出来的（CLAUDE.md I5）。
+    std::stringstream mode;
+    mode << "[Broker " << config_.broker_id << "] MODE"
+         << " he_enabled=" << (he_enabled_ ? 1 : 0)
+         << " has_parent=" << (has_parent_ ? 1 : 0)
+         << " brake_limit=" << config_.brake_limit
+         << " brake_window=" << config_.brake_window_sec << "s";
+    logger.pushLog(mode.str());
+
+    if (he_enabled_) {
+        // 只打印公钥模数 n 的位长和指纹，不打印任何密钥材料本身。
+        // 位长单独无法区分两把不同的 2048 位密钥，所以额外给一个指纹，
+        // 用来确认 broker 和客户端加载的是同一把。
+        std::string n_hex = mpzToHex(he_n_);
+        std::stringstream fp;
+        fp << std::hex << std::hash<std::string>{}(n_hex);
+        std::stringstream key;
+        key << "[Broker " << config_.broker_id << "] HE_KEY"
+            << " source=" << he_key_source_
+            << " n_bits=" << mpz_sizeinbase(he_n_.get_mpz_t(), 2)
+            << " n_fp=" << fp.str();
+        logger.pushLog(key.str());
+    }
 }
 
 DnsMulticastBroker::~DnsMulticastBroker() {
@@ -107,6 +133,7 @@ void DnsMulticastBroker::initCrypto() {
         he_mu_ = p.getMu();
         he_n_sq_ = he_n_ * he_n_;
         he_enabled_ = true;
+        he_key_source_ = "generated(root)";
 
         // Save public key for leaf brokers
         std::ofstream ofs(key_file);
@@ -132,6 +159,7 @@ void DnsMulticastBroker::initCrypto() {
             he_mu_ = hexToMpz(mu_hex);
             he_n_sq_ = he_n_ * he_n_;
             he_enabled_ = true;
+            he_key_source_ = key_file;
         } else {
             std::cerr << "Warning: Could not read HEPS key file. Running in plaintext mode." << std::endl;
             he_enabled_ = false;
@@ -142,6 +170,8 @@ void DnsMulticastBroker::initCrypto() {
 bool DnsMulticastBroker::executeMatch(const std::string& bval_n_hex, 
                                       const std::string& bval_m1_hex, 
                                       const std::string& bval_m2_hex) const {
+    // 在函数入口计数：即使因为参数为空提前返回，这次调用也确实发生过。
+    stat_match_calls++;
     if (bval_n_hex.empty() || bval_m1_hex.empty() || bval_m2_hex.empty()) return false;
 
     mpz_class bval_n = hexToMpz(bval_n_hex);
@@ -162,6 +192,7 @@ bool DnsMulticastBroker::executeMatch(const std::string& bval_n_hex,
 
     if (diff2 <= he_n_ / 2) return false; // x >= v+1
 
+    stat_match_hits++;
     return true; // Match!
 }
 
@@ -192,6 +223,8 @@ bool DnsMulticastBroker::brakeAllows(const std::string& service, float lat, floa
     }
 
     if (static_cast<int>(queue.size()) >= config_.brake_limit) {
+        // 在这里计数而不是在调用点：调用点漏写 else 分支时计数器会静默失真。
+        stat_braked++;
         return false;
     }
 
@@ -211,6 +244,7 @@ void DnsMulticastBroker::updateMyRegion() {
 // SUBSCRIBE
 // ============================================================
 void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct sockaddr_in& client) {
+    stat_sub_received++;   // 含 FROM_CHILD，也含下面因缺字段而被丢弃的
     auto name = msg.getServiceName();
     if (!name) return;
 
@@ -304,6 +338,7 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
 // PUBLISH
 // ============================================================
 void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct sockaddr_in& client) {
+    stat_pub_received++;   // 含来自 parent/child 的，也含下面因缺字段而被丢弃的
     auto name = msg.getServiceName();
     if (!name) return;
     
@@ -348,9 +383,8 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
             auto pkt = fwd.build();
             sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&parent_addr_, sizeof(parent_addr_));
             stat_forward_up++;
-        } else {
-            stat_braked++;
         }
+        // brake 拒绝的情况已经在 brakeAllows() 内部计入 stat_braked
     }
 
     // 3. 向下传播
@@ -504,7 +538,15 @@ void DnsMulticastBroker::handleRegionUpdate(const TlvMessage& msg, const struct 
 }
 
 void DnsMulticastBroker::handleStatsRequest(const struct sockaddr_in& client) {
+    // 快照量：每次上报时从实时状态重新取，不做增量维护，避免与真实状态漂移。
+    // stat_sub_groups 是 subscribers 表里 key 的个数 —— 如果 N 个订阅同一个名字的
+    // 订阅者真的合并成了一组，它应当是 1 而不是 N。
+    stat_sub_groups = subscribers.size();
+    stat_he_mode = he_enabled_ ? 1 : 0;
+
     TlvMessageBuilder resp(MsgType::STATS_RESPONSE);
+
+    // --- 旧的 32 字节 STATS_DATA (0x0006)，保持不变以免旧解析代码失效 ---
     uint8_t stats_buf[32];
     uint64_t net_up = htobe64(stat_forward_up);
     uint64_t net_down = htobe64(stat_forward_down);
@@ -517,6 +559,30 @@ void DnsMulticastBroker::handleStatsRequest(const struct sockaddr_in& client) {
     std::memcpy(stats_buf + 24, &net_braked, 8);
     
     resp.addTlv(TlvType::STATS_DATA, stats_buf, 32);
+
+    // --- 新的 80 字节 STATS_DATA_EXT (0x0007)，10 个 big-endian uint64 ---
+    // 顺序必须与 README「TLV Field Types」表一致：
+    // forward_up, forward_down, delivered_local, braked,
+    // match_calls, match_hits, pub_received, sub_received, sub_groups, he_mode
+    const uint64_t ext_values[10] = {
+        stat_forward_up,
+        stat_forward_down,
+        stat_delivered_local,
+        stat_braked,
+        stat_match_calls,
+        stat_match_hits,
+        stat_pub_received,
+        stat_sub_received,
+        stat_sub_groups,
+        stat_he_mode
+    };
+    uint8_t ext_buf[80];
+    for (size_t i = 0; i < 10; i++) {
+        uint64_t be = htobe64(ext_values[i]);
+        std::memcpy(ext_buf + i * 8, &be, 8);
+    }
+    resp.addTlv(TlvType::STATS_DATA_EXT, ext_buf, 80);
+
     auto pkt = resp.build();
     sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&client, sizeof(client));
 }
