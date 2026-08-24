@@ -109,9 +109,9 @@ A chronological record of technical learning, design decisions, and implementati
 - `TlvMessage` class: Zero-copy parser wrapping a raw `recvfrom` buffer; traverses TLV fields by pointer arithmetic
 - `TlvMessageBuilder` class: Constructs wire-format packets with `addCoordinates()`, `addServiceName()`, `addFlags()`, `setPayload()`
 - `geo.h`: `Region` struct with `contains()`, `overlaps()`, `merge()`, `quadrantCenters()`, `quadrantOf()` — ready for Phase 2
-- `brakeAllows()`: Per-service, per-quadrant sliding window counter — configurable limit and window
+- `brakeAllows(dir, ...)`: Per-service, per-quadrant sliding window counter — configurable limit and window. **T3:** takes a direction (upward vs local) with an independent window each, so `brake_scope=both` gates both directions without one consuming the other's quota.
 - `handleSubscribe()`: Inserts into `subscribers[name]`, initializes `cached_closest_dist = ∞`, returns cached pub if `QUERY_MODE` flag set
-- `handlePublish()`: Cache publication → brake check → iterate all subscribers, forward to those for whom `dist < cached_closest_dist`
+- `handlePublish()`: Cache publication → (upward brake, if `brake_scope∈{upward,both}`) → downward propagation → (local brake, if `brake_scope∈{local,both}`) → iterate subscribers, forward to those for whom `dist < cached_closest_dist`. The local brake sits **after** the pub_cache write so `QUERY_MODE` still sees braked publications.
 
 ---
 
@@ -161,14 +161,18 @@ This validated Algorithm 1's per-subscriber closest filtering: each subscriber i
 
 **Benchmark Results (10 pubs, 50 subs, 5 trials):**
 
-| Brake Limit | Recall | Stretch |
-|-------------|--------|---------|
-| 1           | 0.384  | 2.546   |
-| 2           | 0.724  | 1.373   |
-| 4           | 1.000  | 1.000   |
-| ∞           | 1.000  | 1.000   |
-
-**Key Finding:** Brake=4 achieves 100% recall with optimal stretch at this scale. Real-system variance (std=0.165 at brake=1) is absent from the Java simulation — this is a unique contribution of real-system measurement.
+> ⚠️ **Table withdrawn — see `docs/audit_2026-08.md` Q1.** The recall-vs-brake_limit
+> sweep once printed here (0.384 → 1.000) was produced under an earlier brake
+> semantics where the brake gated **only upward forwarding**. A single broker has
+> no parent, so that brake never fired — the single-broker sweep it describes is
+> not reproducible with the code that shipped after the Phase 2 refactor.
+>
+> **T3 fix (this change):** the brake now honours a `brake_scope` config field
+> (`upward` | `local` | `both`, default `both`). With `both`/`local` a single
+> broker rate-limits local delivery again, restoring the paper's Algorithm 1
+> intent (brake = general propagation limiter). New single-broker sweep data must
+> be re-collected on the current code before any table is restored. No fabricated
+> numbers are kept in the meantime.
 
 ---
 
@@ -239,7 +243,7 @@ This validated Algorithm 1's per-subscriber closest filtering: each subscriber i
 - With dynamic MBH, Root sees the leaf's true coverage area → publications distribute across quadrants → more are forwarded
 
 **Traffic Statistics Interface:**
-- Added 4 counters in Broker: `stat_forward_up`, `stat_forward_down`, `stat_delivered_local`, `stat_braked`
+- Added 4 counters in Broker: `stat_forward_up`, `stat_forward_down`, `stat_delivered_local`, `stat_braked` (T3 split into `stat_braked_up` + `stat_braked_local`; legacy `braked` field now reports their sum)
 - `STATS_REQUEST` (0x0008) / `STATS_RESPONSE` (0x0009) protocol for benchmark to query counters
 - `STATS_DATA` TLV (0x0006): 32 bytes containing 4× `uint64_t` in big-endian
 
@@ -312,7 +316,7 @@ The core hypothesis is validated: DNS++ can resolve names privately and steer us
 |------|------------|
 | **Broker** | DNS++ overlay node that routes subscriptions and publications |
 | **MBH** | Minimum Bounding Hyperrectangle — the spatial region managed by a broker |
-| **Brake** | Per-quadrant rate limiter on upward publication propagation |
+| **Brake** | Per-quadrant rate limiter on publication propagation. `brake_scope` (`upward`/`local`/`both`, default `both`) selects which direction(s) it gates; each direction keeps an independent sliding window. Reported split as `braked_up` / `braked_local` in `STATS_DATA_EXT`. |
 | **Quadrant cache** | Per-child, per-quadrant closest-distance cache for downward propagation filtering |
 | **Closest cache** | Per-subscriber state tracking the distance of the nearest received publication |
 | **Query mode** | Subscription flag requesting immediate return of cached publications |

@@ -52,6 +52,7 @@ void createBrokerConfig(const std::string& filename, const std::string& id,
     fprintf(f, "coords=%f,%f\n", lat, lon);
     fprintf(f, "brake_limit=%d\n", brake_limit);
     fprintf(f, "brake_window=10\n");
+    fprintf(f, "brake_scope=both\n");
     fclose(f);
 }
 
@@ -247,7 +248,9 @@ int main(int argc, char* argv[]) {
         uint64_t total_up = 0, total_down = 0, total_local = 0, total_braked = 0;
         // STATS_DATA_EXT (TLV 0x0007) 的累计量与每 broker 快照量。
         // 解析它只需要 TlvMessage + endian.h，不引入任何密码学依赖。
-        uint64_t ext_total[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        // 10 个累计槽：STATS_DATA_EXT 索引 0-7，外加 T3 新增的 braked_up/braked_local
+        // (索引 10/11)。索引 8/9 (sub_groups/he_mode) 是快照量，不进这里。
+        uint64_t ext_total[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         long ext_sub_groups[3] = {-1, -1, -1};   // -1 = 没拿到
         long ext_he_mode[3]    = {-1, -1, -1};
         int ext_ok = 0;
@@ -285,16 +288,21 @@ int main(int argc, char* argv[]) {
 
                     uint16_t elen;
                     const uint8_t* e = msg.findTlv(TlvType::STATS_DATA_EXT, &elen);
+                    // T3 起 STATS_DATA_EXT 是 96 字节 (12 uint64)；仍兼容 80 字节的旧 broker。
                     if (e && elen >= 80) {
-                        uint64_t vals[10];
-                        for (int i = 0; i < 10; i++) {
+                        int nfields = (elen >= 96) ? 12 : 10;
+                        uint64_t vals[12] = {0};
+                        for (int i = 0; i < nfields; i++) {
                             uint64_t be;
                             std::memcpy(&be, e + i * 8, 8);
                             vals[i] = be64toh(be);
                         }
-                        // 前 8 个是累计量，可以跨 broker 相加
+                        // 索引 0-7 是累计量，跨 broker 相加
                         for (int i = 0; i < 8; i++) ext_total[i] += vals[i];
-                        // 后 2 个是每 broker 的快照量，相加没有意义，分别保留
+                        // 索引 10/11 (braked_up/braked_local) 也是累计量
+                        ext_total[8] += vals[10];   // braked_up
+                        ext_total[9] += vals[11];   // braked_local
+                        // 索引 8/9 (sub_groups/he_mode) 是每 broker 的快照量，分别保留
                         ext_sub_groups[b_idx] = static_cast<long>(vals[8]);
                         ext_he_mode[b_idx]    = static_cast<long>(vals[9]);
                         ext_ok++;
@@ -315,12 +323,13 @@ int main(int argc, char* argv[]) {
                   << " | Traffic Ratio=" << traffic_ratio << std::endl;
 
         // Broker 侧计数器。3 个 broker 全部应答才算完整；缺一个都必须看得出来。
-        static const char* kExtNames[8] = {
+        static const char* kExtNames[10] = {
             "forward_up", "forward_down", "delivered_local", "braked",
-            "match_calls", "match_hits", "pub_received", "sub_received"
+            "match_calls", "match_hits", "pub_received", "sub_received",
+            "braked_up", "braked_local"
         };
         std::cerr << "  broker stats (sum over " << ext_ok << "/3 brokers, cumulative):";
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 10; i++) {
             std::cerr << " " << kExtNames[i] << "=" << ext_total[i];
         }
         std::cerr << std::endl;

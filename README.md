@@ -41,7 +41,7 @@ This repository contains a **from-scratch C++ implementation** of the DNS++ brok
 | Encrypted Broker routing | ✅ Done | `executeMatch()` replaces plaintext string comparison |
 | Plaintext vs Encrypted benchmarks | ✅ Done | 3.3x bounded latency overhead measured, 100% recall maintained |
 | Scalability sweep | ✅ Done | Tested up to 1000 subscribers, 100% recall maintained |
-| Unit tests | ✅ Done | TLV (8), Geo (7), Paillier (4), HEPS (2) |
+| Unit tests | ✅ Done | TLV (8), Geo (7), Paillier (4), HEPS (2), Brake (10) |
 | Integration & Benchmark scripts | ✅ Done | Single-broker, multi-broker, and crypto comparison scripts |
 
 ---
@@ -139,7 +139,7 @@ Each TLV:
 | `BRAKE_LIMIT` | 0x0004 | 4 bytes | Per-quadrant publication limit |
 | `REGION` | 0x0005 | 16 bytes | `4×float` MBH (min/max lat/lon) |
 | `STATS_DATA` | 0x0006 | 32 bytes | `4×uint64_t` traffic counters (legacy, unchanged) |
-| `STATS_DATA_EXT` | 0x0007 | 80 bytes | `10×uint64_t` (big-endian): `forward_up`, `forward_down`, `delivered_local`, `braked`, `match_calls`, `match_hits`, `pub_received`, `sub_received`, `sub_groups`, `he_mode` |
+| `STATS_DATA_EXT` | 0x0007 | 96 bytes | `12×uint64_t` (big-endian): `forward_up`, `forward_down`, `delivered_local`, `braked` (= `braked_up`+`braked_local`), `match_calls`, `match_hits`, `pub_received`, `sub_received`, `sub_groups`, `he_mode`, `braked_up`, `braked_local` |
 | `BLINDED_VALUE` | 0x0010 | Variable | Paillier-blinded notification (Phase 3) |
 | `BLINDED_VALUE_HI` | 0x0011 | Variable | Paillier-blinded subscription `v+1` (Phase 3) |
 
@@ -155,6 +155,15 @@ cd dns_plus_plus
 mkdir -p build && cd build
 cmake ..
 make
+```
+
+### Run Tests
+
+```bash
+# from the repository root, after building into ./build
+./build/test_tlv && ./build/test_geo && ./build/test_paillier && ./build/test_heps
+# test_brake forks a real dns_broker subprocess, so pass the binary path:
+./build/test_brake ./build/dns_broker
 ```
 
 ### Run Encrypted Single-Broker (Phase 3)
@@ -205,12 +214,22 @@ sleep 1
 ./bench_broker 127.0.0.1 8080 10 50 4 5 42 1 > encrypted.csv 2>encrypted.log
 kill %1
 
-# Single-broker brake sweep
-./dns_broker ../configs/single.conf &
-./bench_broker 127.0.0.1 8080 10 50 2 5 42 > results.csv 2>summary.log
-kill %1
-# NOTE: bench_broker's brake_limit argument is only recorded in the output CSV;
-# the broker's own brake_limit comes from its config file. See docs/audit_2026-08.md Q1.
+# Reproducing the brake sweep (single broker)
+# The brake now applies to local delivery when brake_scope is local or both, so a
+# single-broker sweep is once again meaningful. IMPORTANT: brake_limit is a BROKER
+# config value, not a benchmark argument -- bench_broker's brake_limit arg is only
+# written into the CSV, it is NOT sent to the broker (see docs/audit_2026-08.md Q1).
+# To sweep brake_limit you must restart the broker with a different config each time:
+for L in 1 2 4 1000; do
+  sed "s/^brake_limit=.*/brake_limit=$L/" ../configs/single.conf > /tmp/sweep_$L.conf
+  ./dns_broker /tmp/sweep_$L.conf &          # config has brake_scope=both
+  BPID=$!; sleep 1
+  ./bench_broker 127.0.0.1 8080 10 50 $L 5 42 0 > brake_$L.csv 2> brake_$L.log
+  kill $BPID; wait $BPID 2>/dev/null
+done
+# NOTE: the awkward "restart per brake_limit" is a consequence of brake_limit living
+# only in the broker config. Wiring it (and brake_scope) onto the benchmark CLI is
+# left to T6.
 
 # Generate charts
 source ../venv/bin/activate
@@ -253,7 +272,8 @@ dns_plus_plus/
 │   ├── test_tlv.cpp           # TLV protocol unit tests
 │   ├── test_geo.cpp           # Geo function unit tests
 │   ├── test_paillier.cpp      # Paillier crypto unit tests
-│   └── test_heps.cpp          # HEPS end-to-end match tests
+│   ├── test_heps.cpp          # HEPS end-to-end match tests
+│   └── test_brake.cpp         # brake_scope local/upward gating (spawns a broker)
 ├── benchmarks/
 │   ├── bench_broker.cpp       # Single-broker benchmark (plain/encrypted)
 │   └── bench_multi_broker.cpp # Multi-broker benchmark (auto-fork)
@@ -288,16 +308,24 @@ dns_plus_plus/
 
 ### Phase 1: Single-Broker Brake Sweep
 
-10 publishers, 50 subscribers, 5 trials per configuration, globally random placement.
-
-| Brake Limit | Recall (mean ± std) | Stretch (mean ± std) |
-|-------------|---------------------|----------------------|
-| 1           | 0.384 ± 0.165       | 2.546 ± 1.043        |
-| 2           | 0.724 ± 0.141       | 1.373 ± 0.233        |
-| 4           | 1.000 ± 0.000       | 1.000 ± 0.000        |
-| ∞           | 1.000 ± 0.000       | 1.000 ± 0.000        |
-
-**Key finding:** Brake=4 achieves 100% recall with optimal stretch at this scale. Real-system variance (std up to 0.165 at brake=1) is absent from the Java simulation.
+> ⚠️ **Data withdrawn — pending re-collection.** The previously published table
+> (recall 0.384 → 1.000 as brake_limit rose) was produced under an earlier,
+> unintended brake semantics in which the propagation brake gated **only upward
+> forwarding**. On a single broker (no parent) that brake never fired, so the
+> reported single-broker sweep could not have been produced by the code that
+> shipped after the Phase 2 refactor (see `docs/audit_2026-08.md` Q1). Those
+> numbers are therefore **not reproducible with the current code and have been
+> removed rather than left to mislead.**
+>
+> As of this change the brake applies to the direction(s) named by the
+> `brake_scope` config field (`upward` | `local` | `both`, default `both`), so a
+> single broker with `brake_scope=both` or `local` now genuinely rate-limits
+> local delivery — matching the paper's Algorithm 1, where the brake is a general
+> limiter on publication propagation.
+>
+> A fresh single-broker sweep must be collected on the current code with
+> `brake_scope=both` before any table is restored here. No numbers are invented
+> in the meantime. See **Reproducing the brake sweep** below for the procedure.
 
 ### Phase 2: Multi-Broker Hierarchical Routing
 
@@ -338,7 +366,7 @@ dns_plus_plus/
 - [x] Query-mode cached response (Algorithm 1, lines 3–5)
 - [x] Equirectangular distance approximation
 - [x] CLI test client with subscribe/publish/heartbeat
-- [x] Unit tests (TLV: 8 tests, Geo: 7 tests)
+- [x] Unit tests (TLV: 8, Geo: 7, Paillier: 4, HEPS: 2, Brake: 10)
 - [x] Integration test script
 - [x] Benchmark framework with CSV output
 - [x] Phase 1 brake sweep results and charts

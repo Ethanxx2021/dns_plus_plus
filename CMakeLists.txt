@@ -54,6 +54,14 @@ add_executable(test_geo
 )
 target_include_directories(test_geo PRIVATE src)
 
+# --- Unit Test: Brake Scope (spawns a real dns_broker subprocess) ---
+add_executable(test_brake
+    tests/test_brake.cpp
+    src/protocol/TlvMessage.cpp
+)
+target_include_directories(test_brake PRIVATE src)
+add_dependencies(test_brake dns_broker)
+
 # --- Benchmark ---
 add_executable(bench_broker
     benchmarks/bench_broker.cpp
