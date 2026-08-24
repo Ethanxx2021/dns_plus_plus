@@ -138,7 +138,8 @@ Each TLV:
 | `SERVICE_NAME` | 0x0003 | Variable | UTF-8 string (any URI) |
 | `BRAKE_LIMIT` | 0x0004 | 4 bytes | Per-quadrant publication limit |
 | `REGION` | 0x0005 | 16 bytes | `4×float` MBH (min/max lat/lon) |
-| `STATS_DATA` | 0x0006 | 32 bytes | `4×uint64_t` traffic counters |
+| `STATS_DATA` | 0x0006 | 32 bytes | `4×uint64_t` traffic counters (legacy, unchanged) |
+| `STATS_DATA_EXT` | 0x0007 | 80 bytes | `10×uint64_t` (big-endian): `forward_up`, `forward_down`, `delivered_local`, `braked`, `match_calls`, `match_hits`, `pub_received`, `sub_received`, `sub_groups`, `he_mode` |
 | `BLINDED_VALUE` | 0x0010 | Variable | Paillier-blinded notification (Phase 3) |
 | `BLINDED_VALUE_HI` | 0x0011 | Variable | Paillier-blinded subscription `v+1` (Phase 3) |
 
@@ -159,9 +160,7 @@ make
 ### Run Encrypted Single-Broker (Phase 3)
 
 ```bash
-# Terminal 1: Start broker (generates /tmp/dnspp_heps_full.key)
-./dns_broker 8080 4 10
-# Terminal 1: Start broker (dns_broker takes a config file, not positional args)
+# Terminal 1: Start broker (takes a config file; generates /tmp/dnspp_heps_full.key)
 ./dns_broker ../configs/single.conf
 
 # Terminal 2: Subscriber in London
@@ -200,10 +199,12 @@ to either command to skip blinding and talk to the broker in plaintext.
 
 ```bash
 # Plaintext vs Encrypted benchmark
-./dns_broker 8080 4 10 &
+./dns_broker ../configs/single.conf &
 sleep 1
 ./bench_broker 127.0.0.1 8080 10 50 4 5 42 0 > plain.csv 2>plain.log
 ./bench_broker 127.0.0.1 8080 10 50 4 5 42 1 > encrypted.csv 2>encrypted.log
+kill %1
+
 # Single-broker brake sweep
 ./dns_broker ../configs/single.conf &
 ./bench_broker 127.0.0.1 8080 10 50 2 5 42 > results.csv 2>summary.log

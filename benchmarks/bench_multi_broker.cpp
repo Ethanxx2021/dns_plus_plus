@@ -245,6 +245,12 @@ int main(int argc, char* argv[]) {
 
         // --- Query traffic stats from all brokers ---
         uint64_t total_up = 0, total_down = 0, total_local = 0, total_braked = 0;
+        // STATS_DATA_EXT (TLV 0x0007) 的累计量与每 broker 快照量。
+        // 解析它只需要 TlvMessage + endian.h，不引入任何密码学依赖。
+        uint64_t ext_total[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        long ext_sub_groups[3] = {-1, -1, -1};   // -1 = 没拿到
+        long ext_he_mode[3]    = {-1, -1, -1};
+        int ext_ok = 0;
         for (int b_idx = 0; b_idx < 3; b_idx++) {
             int stat_fd = socket(AF_INET, SOCK_DGRAM, 0);
             struct sockaddr_in broker_addr{};
@@ -276,6 +282,23 @@ int main(int argc, char* argv[]) {
                         total_local += local;
                         total_braked += braked;
                     }
+
+                    uint16_t elen;
+                    const uint8_t* e = msg.findTlv(TlvType::STATS_DATA_EXT, &elen);
+                    if (e && elen >= 80) {
+                        uint64_t vals[10];
+                        for (int i = 0; i < 10; i++) {
+                            uint64_t be;
+                            std::memcpy(&be, e + i * 8, 8);
+                            vals[i] = be64toh(be);
+                        }
+                        // 前 8 个是累计量，可以跨 broker 相加
+                        for (int i = 0; i < 8; i++) ext_total[i] += vals[i];
+                        // 后 2 个是每 broker 的快照量，相加没有意义，分别保留
+                        ext_sub_groups[b_idx] = static_cast<long>(vals[8]);
+                        ext_he_mode[b_idx]    = static_cast<long>(vals[9]);
+                        ext_ok++;
+                    }
                 }
             }
             close(stat_fd);
@@ -290,6 +313,22 @@ int main(int argc, char* argv[]) {
                   << " | Traffic: up=" << total_up << " down=" << total_down 
                   << " local=" << total_local << " braked=" << total_braked 
                   << " | Traffic Ratio=" << traffic_ratio << std::endl;
+
+        // Broker 侧计数器。3 个 broker 全部应答才算完整；缺一个都必须看得出来。
+        static const char* kExtNames[8] = {
+            "forward_up", "forward_down", "delivered_local", "braked",
+            "match_calls", "match_hits", "pub_received", "sub_received"
+        };
+        std::cerr << "  broker stats (sum over " << ext_ok << "/3 brokers, cumulative):";
+        for (int i = 0; i < 8; i++) {
+            std::cerr << " " << kExtNames[i] << "=" << ext_total[i];
+        }
+        std::cerr << std::endl;
+        std::cerr << "  per-broker snapshot (root,leaf1,leaf2): sub_groups=["
+                  << ext_sub_groups[0] << "," << ext_sub_groups[1] << "," << ext_sub_groups[2]
+                  << "] he_mode=["
+                  << ext_he_mode[0] << "," << ext_he_mode[1] << "," << ext_he_mode[2]
+                  << "]  (-1 = no STATS_DATA_EXT in response)" << std::endl;
 
         for (auto& s : subs) {
             if (s.fd >= 0) close(s.fd);

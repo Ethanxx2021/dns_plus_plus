@@ -24,12 +24,56 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <endian.h>
 
 struct Publisher {
     int id;
     float lat;
     float lon;
 };
+
+// STATS_DATA_EXT (TLV 0x0007): 10 x uint64_t big-endian.
+// 顺序与 broker 的 handleStatsRequest() 一致。
+static const char* kStatNames[10] = {
+    "forward_up", "forward_down", "delivered_local", "braked",
+    "match_calls", "match_hits", "pub_received", "sub_received",
+    "sub_groups", "he_mode"
+};
+
+// 向 broker 请求扩展统计。返回 false 表示没拿到（broker 没响应，或者是一个
+// 还不认识 0x0007 的旧 broker）—— 调用方必须把这种情况显式报出来，
+// 不能当成「计数器全 0」。
+bool queryStatsExt(const struct sockaddr_in& broker_addr, uint64_t out[10]) {
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return false;
+
+    TlvMessageBuilder req(MsgType::STATS_REQUEST);
+    auto pkt = req.build();
+    sendto(fd, pkt.data(), pkt.size(), 0,
+           (const struct sockaddr*)&broker_addr, sizeof(broker_addr));
+
+    struct timeval tv = {1, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t buf[2048];
+    int n = recv(fd, buf, sizeof(buf), 0);
+    close(fd);
+    if (n <= 0) return false;
+
+    TlvMessage msg(buf, static_cast<size_t>(n));
+    if (!msg.isValid() || msg.getMsgType() != MsgType::STATS_RESPONSE) return false;
+
+    uint16_t len = 0;
+    const uint8_t* v = msg.findTlv(TlvType::STATS_DATA_EXT, &len);
+    if (!v || len < 80) return false;
+
+    for (int i = 0; i < 10; i++) {
+        uint64_t be;
+        std::memcpy(&be, v + i * 8, 8);
+        out[i] = be64toh(be);
+    }
+    return true;
+}
 
 struct Subscriber {
     int id;
@@ -261,6 +305,21 @@ int main(int argc, char* argv[]) {
                   << " avg_latency=" << avg_latency << "ms"
                   << (encrypted ? " (Encrypted)" : " (Plaintext)")
                   << std::endl;
+
+        // Broker 侧计数器：用来证明这次跑的到底是不是加密模式、订阅是否真的分了组。
+        // 除 sub_groups / he_mode 是当前快照外，其余为 broker 启动以来的累计值。
+        uint64_t st[10];
+        if (queryStatsExt(broker_addr, st)) {
+            std::cerr << "  broker stats (cumulative):";
+            for (int i = 0; i < 10; i++) {
+                std::cerr << " " << kStatNames[i] << "=" << st[i];
+            }
+            std::cerr << std::endl;
+        } else {
+            std::cerr << "  broker stats: UNAVAILABLE"
+                      << " (no STATS_DATA_EXT in response -- broker not running,"
+                      << " or built before TLV 0x0007)" << std::endl;
+        }
 
         for (auto& s : subs) {
             if (s.fd >= 0) close(s.fd);
