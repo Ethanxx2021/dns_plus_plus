@@ -249,7 +249,8 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
     // Phase 3: Use blinded values as key if available
     auto bval_m1 = msg.getBlindedValue();
     auto bval_m2 = msg.getBlindedValueHi();
-    std::string sub_key = (bval_m1 && he_enabled_) ? *bval_m1 : *name;
+    // 使用 hash(name) 模拟 Cover 协议的分组效果
+    std::string sub_key = (bval_m1 && he_enabled_) ? hashServiceName(*name) : *name;
 
     if (bval_m1 && bval_m2) {
         gc.blinded_m1 = *bval_m1;
@@ -290,7 +291,7 @@ void DnsMulticastBroker::handleSubscribe(const TlvMessage& msg, const struct soc
 
     if (has_parent_ && ot_parent_.find(sub_key) == ot_parent_.end()) {
         TlvMessageBuilder fwd(MsgType::SUBSCRIBE);
-        fwd.addServiceName(sub_key); // Propagate the blinded key upwards
+        fwd.addServiceName(sub_key);
         fwd.addCoordinates(config_.lat, config_.lon);
         fwd.addFlags(MsgFlags::FROM_CHILD);
         auto pkt = fwd.build();
@@ -324,7 +325,7 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
     
     // Phase 3: Determine pub_key
     auto bval_n_opt = msg.getBlindedValue();
-    std::string pub_key = (bval_n_opt && he_enabled_) ? *bval_n_opt : *name;
+    std::string pub_key = (bval_n_opt && he_enabled_) ? hashServiceName(*name) : *name;
     
     pub_cache[pub_key].push_back(std::move(cp));
 
@@ -342,7 +343,7 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
             if (msg.getPayload() && msg.getPayloadSize() > 0) {
                 fwd.setPayload(msg.getPayload(), msg.getPayloadSize());
             }
-            if (bval_n_opt) fwd.addBlindedValue(*bval_n_opt); // Propagate blinded value
+            if (bval_n_opt) fwd.addBlindedValue(*bval_n_opt);
             fwd.addFlags(MsgFlags::FROM_CHILD);
             auto pkt = fwd.build();
             sendto(server_fd, pkt.data(), pkt.size(), 0, (const struct sockaddr*)&parent_addr_, sizeof(parent_addr_));
@@ -382,41 +383,36 @@ void DnsMulticastBroker::handlePublish(const TlvMessage& msg, const struct socka
         }
     }
 
-        // 4. 本地投递
+    // 4. 本地投递
+    auto it = subscribers.find(pub_key);
+    if (it == subscribers.end() || it->second.empty()) return;
+
     int delivered = 0;
     const uint8_t* raw = msg.getRawData();
     size_t raw_len = msg.getRawSize();
 
     if (he_enabled_ && bval_n_opt) {
-        // Phase 3: 加密匹配模式
-        // 遍历所有订阅组，用 executeMatch 检查是否匹配
-        for (auto& [sub_key, sub_list] : subscribers) {
-            if (sub_list.empty()) continue;
-            
-            const auto& gc0 = sub_list.front();
-            if (gc0.blinded_m1.empty()) continue;
+        // Phase 3: 加密匹配模式 (O(1) 查找 + 单次 Match)
+        const auto& gc0 = it->second.front();
+        if (gc0.blinded_m1.empty()) return;
 
-            // 执行同态加密 Match 操作
-            if (!executeMatch(*bval_n_opt, gc0.blinded_m1, gc0.blinded_m2)) {
-                continue; // 不匹配，跳过该组
-            }
+        // 只对组内第一个订阅者做一次 Match
+        if (!executeMatch(*bval_n_opt, gc0.blinded_m1, gc0.blinded_m2)) {
+            return; // 不匹配，丢弃
+        }
 
-            // 匹配成功，投递给该组的所有订阅者
-            for (auto& gc : sub_list) {
-                double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
-                if (dist < gc.cached_closest_dist) {
-                    sendto(server_fd, raw, raw_len, 0, (const struct sockaddr*)&gc.addr, sizeof(gc.addr));
-                    gc.cached_closest_dist = dist;
-                    delivered++;
-                    stat_delivered_local++;
-                }
+        // 匹配成功，投递给该组的所有订阅者
+        for (auto& gc : it->second) {
+            double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
+            if (dist < gc.cached_closest_dist) {
+                sendto(server_fd, raw, raw_len, 0, (const struct sockaddr*)&gc.addr, sizeof(gc.addr));
+                gc.cached_closest_dist = dist;
+                delivered++;
+                stat_delivered_local++;
             }
         }
     } else {
-        // 明文模式 (向后兼容)
-        auto it = subscribers.find(pub_key);
-        if (it == subscribers.end() || it->second.empty()) return;
-
+        // 明文模式
         for (auto& gc : it->second) {
             double dist = geoDistance(pub_lat, pub_lon, gc.lat, gc.lon);
             if (dist < gc.cached_closest_dist) {
@@ -471,6 +467,11 @@ std::string DnsMulticastBroker::findChildByAddr(const struct sockaddr_in& addr) 
         }
     }
     return "";
+}
+
+std::string DnsMulticastBroker::hashServiceName(const std::string& name) const {
+    std::hash<std::string> h;
+    return std::to_string(h(name));
 }
 
 void DnsMulticastBroker::sendRegionUpdateToParent() {

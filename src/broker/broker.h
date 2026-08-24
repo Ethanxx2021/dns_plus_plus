@@ -12,6 +12,7 @@
 #include <string>
 #include <array>
 #include <gmpxx.h>
+
 #include "protocol/TlvMessage.h"
 #include "logger/logger.h"
 #include "utils/geo.h"
@@ -104,6 +105,7 @@ private:
     bool brakeAllows(const std::string& service, float lat, float lon);
     void updateMyRegion();
     std::string findChildByAddr(const struct sockaddr_in& addr) const;
+    std::string hashServiceName(const std::string& name) const;
 
     // ---------- 消息处理器 ----------
     void handleSubscribe(const TlvMessage& msg, const struct sockaddr_in& client);

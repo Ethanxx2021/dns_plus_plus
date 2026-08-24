@@ -133,17 +133,26 @@ int main(int argc, char* argv[]) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
+        // --- Pre-compute blinded values (if encrypted) ---
+        std::vector<std::string> bval_ns(pubs.size());
+        if (encrypted) {
+            for (size_t i = 0; i < pubs.size(); i++) {
+                bval_ns[i] = heps.blindNotification(service);
+            }
+        }
+
+        // --- Send publications ---
         auto publish_start = std::chrono::steady_clock::now();
 
-        for (const auto& p : pubs) {
+        for (size_t i = 0; i < pubs.size(); i++) {
+            const auto& p = pubs[i];
             TlvMessageBuilder builder(MsgType::PUBLISH);
             builder.addServiceName(service);
             builder.addCoordinates(p.lat, p.lon);
             builder.setPayload(std::to_string(p.id));
             
             if (encrypted) {
-                std::string bval_n = heps.blindNotification(service);
-                builder.addBlindedValue(bval_n);
+                builder.addBlindedValue(bval_ns[i]); // Use pre-computed value
             }
             
             auto pkt = builder.build();

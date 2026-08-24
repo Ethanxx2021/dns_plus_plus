@@ -12,4 +12,6 @@ venv/
 .idea/
 
 # OS files
-.DS_Store
+.DS_Storebuild/
+build-asan/
+*.o

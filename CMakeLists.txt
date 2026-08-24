@@ -73,3 +73,11 @@ add_executable(bench_multi_broker
     src/protocol/TlvMessage.cpp
 )
 target_include_directories(bench_multi_broker PRIVATE src)
+
+add_executable(test_crypto_microbench
+    tests/test_crypto_microbench.cpp
+    src/crypto/Paillier.cpp
+    src/crypto/Heps.cpp
+)
+target_include_directories(test_crypto_microbench PRIVATE src /usr/include/x86_64-linux-gnu)
+target_link_libraries(test_crypto_microbench PRIVATE gmp gmpxx)
