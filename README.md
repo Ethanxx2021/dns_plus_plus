@@ -159,8 +159,13 @@ make
 ### Run Encrypted Single-Broker (Phase 3)
 
 ```bash
+<<<<<<< HEAD
 # Terminal 1: Start broker (generates /tmp/dnspp_heps_full.key)
 ./dns_broker 8080 4 10
+=======
+# Terminal 1: Start broker (dns_broker takes a config file, not positional args)
+./dns_broker ../configs/single.conf
+>>>>>>> origin/main
 
 # Terminal 2: Subscriber in London
 ./test_client sub 127.0.0.1 8080 weather.example 51.5 -0.1
@@ -169,6 +174,10 @@ make
 ./test_client pub 127.0.0.1 8080 weather.example 48.8 2.3 Paris-edge-1
 # → London subscriber receives publication via encrypted Match!
 ```
+
+`test_client` blinds its messages by default, which requires the root broker to have
+already written `/tmp/dnspp_heps_full.key`. Append `--plaintext` (alias `--no-encrypt`)
+to either command to skip blinding and talk to the broker in plaintext.
 
 ### Run Multi-Broker Tree (Phase 2)
 
@@ -193,12 +202,20 @@ make
 ### Run Benchmarks
 
 ```bash
+<<<<<<< HEAD
 # Plaintext vs Encrypted benchmark
 ./dns_broker 8080 4 10 &
 sleep 1
 ./bench_broker 127.0.0.1 8080 10 50 4 5 42 0 > plain.csv 2>plain.log
 ./bench_broker 127.0.0.1 8080 10 50 4 5 42 1 > encrypted.csv 2>encrypted.log
+=======
+# Single-broker brake sweep
+./dns_broker ../configs/single.conf &
+./bench_broker 127.0.0.1 8080 10 50 2 5 42 > results.csv 2>summary.log
+>>>>>>> origin/main
 kill %1
+# NOTE: bench_broker's brake_limit argument is only recorded in the output CSV;
+# the broker's own brake_limit comes from its config file. See docs/audit_2026-08.md Q1.
 
 # Generate charts
 source ../venv/bin/activate
