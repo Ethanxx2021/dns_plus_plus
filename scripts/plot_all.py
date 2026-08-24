@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
 """
-DNS++ Complete Figure Generator
-Generates all Phase 1-3 figures to top-journal standards.
+DNS++ 正式实验图生成器(改造版)。
+
+读取 results/final/ 下的正式数据,生成修正画法的图:
+  - 误差棒改用 bootstrap 95% percentile CI(不再用对称 std,避免越界)
+  - stretch 增加 CDF
+  - 新增 dynamics 收敛时间 CDF(closer vs farther)
+  - 图上标注 n(trial 数)
+
+用法: venv/bin/python scripts/plot_all.py [results_dir]
+输出: <results_dir>/figures/*.png
 """
 
 import csv
-import sys
 import os
-import statistics
+import sys
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ============================================================
-# Global Style Settings (SIGCOMM / TMLR Standard)
-# ============================================================
+RNG = np.random.default_rng(20260824)
+N_BOOT = 10000
+
 plt.rcParams.update({
     "font.family": "serif",
-    "font.serif": ["Times New Roman", "DejaVu Serif", "Liberation Serif"],
     "font.size": 11,
     "axes.labelsize": 12,
     "axes.titlesize": 12,
-    "xtick.labelsize": 10,
-    "ytick.labelsize": 10,
-    "legend.fontsize": 10,
-    "figure.dpi": 300,
+    "figure.dpi": 200,
     "axes.grid": True,
     "grid.alpha": 0.3,
     "grid.linestyle": "--",
@@ -33,361 +37,297 @@ plt.rcParams.update({
     "axes.spines.right": False,
 })
 
-# Color palette (colorblind-friendly)
-COLORS = {
-    "green": "#2ca02c",
-    "red": "#d62728",
-    "blue": "#1f77b4",
-    "orange": "#ff7f0e",
-    "purple": "#9467bd",
-    "gray": "#7f7f7f",
-}
+C = {"green": "#2ca02c", "red": "#d62728", "blue": "#1f77b4",
+     "orange": "#ff7f0e", "purple": "#9467bd", "gray": "#7f7f7f"}
 
-# ============================================================
-# Helper: Parse bench_broker CSV
-# ============================================================
-def parse_csv(filename):
-    trials = {}
-    with open(filename, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            t = int(row['trial'])
-            if t not in trials:
-                trials[t] = []
-            trials[t].append(row)
-    return trials
 
-def compute_stats(trials):
-    recalls = []
-    stretches = []
-    latencies = []
-    for t, subs in trials.items():
-        recalls.append(statistics.mean(int(s['recall']) for s in subs))
-        st = [float(s['stretch']) for s in subs if float(s['stretch']) > 0]
-        if st:
-            stretches.append(statistics.mean(st))
-        # Phase 1 CSVs don't have latency_ms column
-        if 'latency_ms' in subs[0]:
-            lat = [float(s['latency_ms']) for s in subs if float(s['latency_ms']) > 0]
-            if lat:
-                latencies.append(statistics.mean(lat))
-    return {
-        'recall_mean': statistics.mean(recalls) if recalls else 0,
-        'recall_std': statistics.stdev(recalls) if len(recalls) > 1 else 0,
-        'stretch_mean': statistics.mean(stretches) if stretches else 0,
-        'stretch_std': statistics.stdev(stretches) if len(stretches) > 1 else 0,
-        'latency_mean': statistics.mean(latencies) if latencies else 0,
-        'latency_std': statistics.stdev(latencies) if len(latencies) > 1 else 0,
-    }
-# ============================================================
-# Helper: Parse bench_multi_broker log
-# ============================================================
-def parse_multi_log(filename):
-    trials = []
-    with open(filename, 'r') as f:
-        for line in f:
-            if line.startswith('Trial'):
-                parts = line.strip().split()
-                recall_str = next((p for p in parts if p.startswith('recall=')), None)
-                stretch_str = next((p for p in parts if p.startswith('avg_stretch=')), None)
-                tr_str = next((p for p in parts if p.startswith('Ratio=')), None)
-                if recall_str and stretch_str and tr_str:
-                    trials.append({
-                        'recall': float(recall_str.split('=')[1]),
-                        'stretch': float(stretch_str.split('=')[1]),
-                        'traffic_ratio': float(tr_str.split('=')[1]),
-                    })
-    return trials
+# --------------------------------------------------------------------------
+def load_rows(path):
+    with open(path, newline='') as f:
+        return list(csv.DictReader(f))
 
-def compute_multi_stats(trials):
-    if not trials:
-        return None
-    return {
-        'recall_mean': statistics.mean(t['recall'] for t in trials),
-        'recall_std': statistics.stdev(t['recall'] for t in trials) if len(trials) > 1 else 0,
-        'stretch_mean': statistics.mean(t['stretch'] for t in trials),
-        'stretch_std': statistics.stdev(t['stretch'] for t in trials) if len(trials) > 1 else 0,
-        'tr_mean': statistics.mean(t['traffic_ratio'] for t in trials),
-        'tr_std': statistics.stdev(t['traffic_ratio'] for t in trials) if len(trials) > 1 else 0,
-    }
 
-# ============================================================
-# Helper: Parse scalability sweep log
-# ============================================================
-def parse_sweep_log(filename):
-    trials = []
-    with open(filename, 'r') as f:
-        for line in f:
-            if line.startswith('Trial'):
-                parts = line.strip().split()
-                recall_str = next((p for p in parts if p.startswith('recall=')), None)
-                stretch_str = next((p for p in parts if p.startswith('avg_stretch=')), None)
-                if recall_str and stretch_str:
-                    trials.append({
-                        'recall': float(recall_str.split('=')[1]),
-                        'stretch': float(stretch_str.split('=')[1]),
-                    })
-    return trials
+def trial_level(rows, metric):
+    by = {}
+    for r in rows:
+        v = metric(r)
+        if v is None:
+            continue
+        by.setdefault(int(r['trial']), []).append(v)
+    return [sum(v) / len(v) for v in by.values() if v]
 
-# ============================================================
-# Figure 1: Phase 1 Brake Sweep (Line Chart)
-# ============================================================
-def plot_phase1_brake_sweep():
-    configs = [
-        (1, 'brake_1.csv', '1'),
-        (2, 'brake_2.csv', '2'),
-        (4, 'brake_4.csv', '4'),
-        (1000, 'brake_1000.csv', '∞'),
-    ]
-    
-    results = []
-    for b, f, label in configs:
-        if os.path.exists(f):
-            stats = compute_stats(parse_csv(f))
-            stats['label'] = label
-            results.append(stats)
-    
-    if len(results) < 2:
-        print("Skipping Phase 1: not enough CSV files")
+
+def boot_ci(values):
+    v = np.asarray(values, dtype=float)
+    means = RNG.choice(v, size=(N_BOOT, len(v)), replace=True).mean(axis=1)
+    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def m_recall(r):
+    return float(r['recall'])
+
+
+def m_stretch(r):
+    s = float(r['stretch'])
+    return s if s > 0 else None
+
+
+def m_latency(r):
+    v = float(r['latency_per_pub_ms'])
+    return v if v >= 0 else None
+
+
+def traffic_ratios(log_path):
+    out = []
+    if not os.path.exists(log_path):
+        return out
+    import re
+    for line in open(log_path, errors='replace'):
+        if line.startswith('Trial') and 'Traffic Ratio=' in line:
+            m = re.search(r'Traffic Ratio=([0-9.]+)', line)
+            if m:
+                out.append(float(m.group(1)))
+    return out
+
+
+# --------------------------------------------------------------------------
+def fig_single_brake(d, outdir):
+    configs = [(1, '1'), (2, '2'), (4, '4'), (1000, '∞')]
+    rec, stre = [], []
+    labels = []
+    for L, lab in configs:
+        p = os.path.join(d, f'single_brake_{L}.csv')
+        if not os.path.exists(p):
+            continue
+        rows = load_rows(p)
+        r = trial_level(rows, m_recall)
+        s = trial_level(rows, m_stretch)
+        if r:
+            rec.append(r); stre.append(s); labels.append(lab)
+    if not rec:
         return
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
-    
-    x = range(len(results))
-    x_labels = [r['label'] for r in results]
-    
-    # (a) Recall
-    recalls = [r['recall_mean'] for r in results]
-    recall_errs = [r['recall_std'] for r in results]
-    ax1.errorbar(x, recalls, yerr=recall_errs, marker='o', color=COLORS['green'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax1.set_ylabel('Recall')
-    ax1.set_title('(a) Recall vs Brake Limit')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(x_labels)
-    ax1.set_ylim(0, 1.15)
-    ax1.axhline(y=1.0, color=COLORS['gray'], linestyle=':', alpha=0.5)
-    
-    # (b) Stretch
-    stretches = [r['stretch_mean'] for r in results]
-    stretch_errs = [r['stretch_std'] for r in results]
-    ax2.errorbar(x, stretches, yerr=stretch_errs, marker='s', color=COLORS['red'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax2.set_ylabel('Average Stretch')
-    ax2.set_title('(b) Stretch vs Brake Limit')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(x_labels)
-    ax2.set_ylim(0.8, max(s + 0.3 for s in stretches))
-    ax2.axhline(y=1.0, color=COLORS['gray'], linestyle=':', alpha=0.5)
-    
-    plt.tight_layout()
-    plt.savefig('phase1_brake_sweep.png', bbox_inches='tight')
-    plt.close()
-    print("Generated: phase1_brake_sweep.png")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+    x = np.arange(len(rec))
+    for ax, data, name, ylab in [
+        (axes[0], rec, 'Recall', 'Recall'),
+        (axes[1], stre, 'Stretch', 'Stretch'),
+    ]:
+        means = [np.mean(v) for v in data]
+        los = []; his = []
+        for v in data:
+            lo, hi = boot_ci(v); los.append(lo); his.append(hi)
+        yerr = [[m - lo for m, lo in zip(means, los)], [hi - m for m, hi in zip(means, his)]]
+        ax.errorbar(x, means, yerr=yerr, marker='o', color=C['green'] if name == 'Recall' else C['red'],
+                    linewidth=1.5, markersize=6, capsize=4, capthick=1.2)
+        ax.set_xticks(x); ax.set_xticklabels(labels)
+        ax.set_ylabel(ylab); ax.set_title(f'({ "a" if name=="Recall" else "b" }) {name} vs brake limit')
+        ax.annotate(f'n={len(data[0])} trials', xy=(0.02, 0.02), xycoords='axes fraction',
+                    fontsize=9, color=C['gray'])
+        if name == 'Recall':
+            ax.set_ylim(0, 1.05); ax.axhline(1.0, color=C['gray'], ls=':', alpha=0.5)
+        else:
+            ax.axhline(1.0, color=C['gray'], ls=':', alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_single_brake.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_single_brake.png')
 
-# ============================================================
-# Figure 2: Phase 2 Multi-Broker (3-panel)
-# ============================================================
-def plot_phase2_multi_broker():
-    configs = [
-        (1, 'multi_brake1.log', '1'),
-        (2, 'multi_brake2.log', '2'),
-        (4, 'multi_brake4.log', '4'),
-        (1000, 'multi_brake_inf.log', '∞'),
-    ]
-    
-    results = []
-    for b, f, label in configs:
-        if os.path.exists(f):
-            stats = compute_multi_stats(parse_multi_log(f))
-            if stats:
-                stats['label'] = label
-                results.append(stats)
-    
-    if len(results) < 2:
-        print("Skipping Phase 2 multi-broker: not enough log files")
+
+def fig_multi_brake(d, outdir):
+    configs = [(1, '1'), (2, '2'), (4, '4'), (1000, '∞')]
+    rec, stre, tr = [], [], []
+    labels = []
+    for L, lab in configs:
+        p = os.path.join(d, f'multi_brake_{L}.csv')
+        if not os.path.exists(p):
+            continue
+        rows = load_rows(p)
+        r = trial_level(rows, m_recall)
+        s = trial_level(rows, m_stretch)
+        t = traffic_ratios(os.path.join(d, f'multi_brake_{L}.log'))
+        if r and t:
+            rec.append(r); stre.append(s); tr.append(t); labels.append(lab)
+    if not rec:
         return
-    
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13, 3.5))
-    
-    x = range(len(results))
-    x_labels = [r['label'] for r in results]
-    
-    # (a) Recall
-    recalls = [r['recall_mean'] for r in results]
-    recall_errs = [r['recall_std'] for r in results]
-    ax1.errorbar(x, recalls, yerr=recall_errs, marker='o', color=COLORS['green'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax1.set_ylabel('Recall')
-    ax1.set_title('(a) Recall vs Brake Limit')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(x_labels)
-    ax1.set_ylim(0.85, 1.05)
-    
-    # (b) Stretch
-    stretches = [r['stretch_mean'] for r in results]
-    stretch_errs = [r['stretch_std'] for r in results]
-    ax2.errorbar(x, stretches, yerr=stretch_errs, marker='s', color=COLORS['red'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax2.set_ylabel('Average Stretch')
-    ax2.set_title('(b) Stretch vs Brake Limit')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(x_labels)
-    ax2.set_ylim(1.0, max(s + 0.02 for s in stretches))
-    
-    # (c) Traffic Ratio
-    trs = [r['tr_mean'] for r in results]
-    tr_errs = [r['tr_std'] for r in results]
-    ax3.errorbar(x, trs, yerr=tr_errs, marker='D', color=COLORS['blue'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax3.set_ylabel('Traffic Ratio')
-    ax3.set_title('(c) Traffic Ratio vs Brake Limit')
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(x_labels)
-    ax3.set_ylim(1.0, max(t + 0.05 for t in trs))
-    ax3.axhline(y=1.0, color=COLORS['gray'], linestyle=':', alpha=0.5)
-    
-    plt.tight_layout()
-    plt.savefig('phase2_multi_broker.png', bbox_inches='tight')
-    plt.close()
-    print("Generated: phase2_multi_broker.png")
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
+    x = np.arange(len(rec))
+    for ax, data, ylab, color, title in [
+        (axes[0], rec, 'Recall', C['green'], '(a) Recall'),
+        (axes[1], stre, 'Stretch', C['red'], '(b) Stretch'),
+        (axes[2], tr, 'Traffic ratio', C['blue'], '(c) Traffic ratio'),
+    ]:
+        means = [np.mean(v) for v in data]
+        los = []; his = []
+        for v in data:
+            lo, hi = boot_ci(v); los.append(lo); his.append(hi)
+        yerr = [[m - lo for m, lo in zip(means, los)], [hi - m for m, hi in zip(means, his)]]
+        ax.errorbar(x, means, yerr=yerr, marker='o', color=color, linewidth=1.5,
+                    markersize=6, capsize=4, capthick=1.2)
+        ax.set_xticks(x); ax.set_xticklabels(labels)
+        ax.set_ylabel(ylab); ax.set_title(f'{title} vs brake limit')
+        ax.annotate(f'n={len(data[0])} trials', xy=(0.02, 0.02), xycoords='axes fraction',
+                    fontsize=9, color=C['gray'])
+        ax.axhline(1.0, color=C['gray'], ls=':', alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_multi_brake.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_multi_brake.png')
 
-# ============================================================
-# Figure 3: Phase 2 Scalability (Line Chart)
-# ============================================================
-def plot_phase2_scalability():
-    configs = [
-        (10, 'sweep_10.log', '10'),
-        (50, 'sweep_50.log', '50'),
-        (200, 'sweep_200.log', '200'),
-        (500, 'sweep_500.log', '500'),
-        (1000, 'sweep_1000.log', '1000'),
-    ]
-    
-    results = []
-    for subs, f, label in configs:
-        if os.path.exists(f):
-            trials = parse_sweep_log(f)
-            if trials:
-                stats = {
-                    'recall_mean': statistics.mean(t['recall'] for t in trials),
-                    'recall_std': statistics.stdev(t['recall'] for t in trials) if len(trials) > 1 else 0,
-                    'stretch_mean': statistics.mean(t['stretch'] for t in trials),
-                    'stretch_std': statistics.stdev(t['stretch'] for t in trials) if len(trials) > 1 else 0,
-                    'label': label,
-                    'subs': subs,
-                }
-                results.append(stats)
-    
-    if len(results) < 2:
-        print("Skipping Phase 2 scalability: not enough log files")
+
+def fig_scale(d, outdir):
+    configs = [(10, '10'), (50, '50'), (200, '200'), (500, '500'), (1000, '1000')]
+    rec, stre = [], []
+    labels = []
+    for N, lab in configs:
+        p = os.path.join(d, f'sweep_{N}.csv')
+        if not os.path.exists(p):
+            continue
+        rows = load_rows(p)
+        r = trial_level(rows, m_recall)
+        s = trial_level(rows, m_stretch)
+        if r:
+            rec.append(r); stre.append(s); labels.append(lab)
+    if not rec:
         return
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
-    
-    x = range(len(results))
-    x_labels = [r['label'] for r in results]
-    
-    # (a) Recall
-    recalls = [r['recall_mean'] for r in results]
-    recall_errs = [r['recall_std'] for r in results]
-    ax1.errorbar(x, recalls, yerr=recall_errs, marker='o', color=COLORS['green'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax1.set_ylabel('Recall')
-    ax1.set_title('(a) Recall vs Subscriber Count')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(x_labels)
-    ax1.set_ylim(0.9, 1.05)
-    ax1.axhline(y=1.0, color=COLORS['gray'], linestyle=':', alpha=0.5)
-    
-    # (b) Stretch
-    stretches = [r['stretch_mean'] for r in results]
-    stretch_errs = [r['stretch_std'] for r in results]
-    ax2.errorbar(x, stretches, yerr=stretch_errs, marker='s', color=COLORS['red'],
-                 linewidth=1.5, markersize=7, capsize=4, capthick=1.5)
-    ax2.set_ylabel('Average Stretch')
-    ax2.set_title('(b) Stretch vs Subscriber Count')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(x_labels)
-    ax2.set_ylim(0.98, 1.02)
-    ax2.axhline(y=1.0, color=COLORS['gray'], linestyle=':', alpha=0.5)
-    
-    plt.tight_layout()
-    plt.savefig('phase2_scalability.png', bbox_inches='tight')
-    plt.close()
-    print("Generated: phase2_scalability.png")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+    x = np.arange(len(rec))
+    for ax, data, name, ylab in [
+        (axes[0], rec, 'Recall', 'Recall'),
+        (axes[1], stre, 'Stretch', 'Stretch'),
+    ]:
+        means = [np.mean(v) for v in data]
+        los = []; his = []
+        for v in data:
+            lo, hi = boot_ci(v); los.append(lo); his.append(hi)
+        yerr = [[m - lo for m, lo in zip(means, los)], [hi - m for m, hi in zip(means, his)]]
+        ax.errorbar(x, means, yerr=yerr, marker='o', color=C['green'] if name == 'Recall' else C['red'],
+                    linewidth=1.5, markersize=6, capsize=4, capthick=1.2)
+        ax.set_xticks(x); ax.set_xticklabels(labels)
+        ax.set_ylabel(ylab); ax.set_title(f'({ "a" if name=="Recall" else "b" }) {name} vs subscribers')
+        ax.annotate(f'n={len(data[0])} trials', xy=(0.02, 0.02), xycoords='axes fraction',
+                    fontsize=9, color=C['gray'])
+        if name == 'Recall':
+            ax.set_ylim(0, 1.05)
+        ax.axhline(1.0, color=C['gray'], ls=':', alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_scale.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_scale.png')
 
-# ============================================================
-# Figure 4: Phase 3 Crypto Comparison (2-panel: Bar + Histogram)
-# ============================================================
-def plot_phase3_crypto():
-    results = []
-    for file, label, color in [('plain.csv', 'Plaintext', COLORS['blue']), 
-                               ('encrypted.csv', 'Encrypted\n(Paillier)', COLORS['orange'])]:
-        if os.path.exists(file):
-            trials = parse_csv(file)
-            lats = []
-            recalls = []
-            stretches = []
-            for t, subs in trials.items():
-                for s in subs:
-                    if 'latency_ms' in s:
-                        lat = float(s['latency_ms'])
-                        if lat > 0: lats.append(lat)
-                    recalls.append(int(s['recall']))
-                    st = float(s['stretch'])
-                    if st > 0: stretches.append(st)
-            results.append({
-                'label': label, 'color': color, 'lats': lats, 
-                'recalls': recalls, 'stretches': stretches
-            })
-    
-    if len(results) < 2:
-        print("Skipping Phase 3: CSV files not found")
+
+def fig_stretch_cdf(d, outdir):
+    configs = [(1, '1'), (2, '2'), (4, '4'), (1000, '∞')]
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    colors = [C['red'], C['orange'], C['green'], C['blue']]
+    for (L, lab), color in zip(configs, colors):
+        p = os.path.join(d, f'single_brake_{L}.csv')
+        if not os.path.exists(p):
+            continue
+        rows = load_rows(p)
+        s = trial_level(rows, m_stretch)   # trial 级 stretch 均值
+        if not s:
+            continue
+        s = np.sort(s)
+        y = np.arange(1, len(s) + 1) / len(s)
+        ax.step(np.concatenate([[1.0], s]), np.concatenate([[0.0], y]),
+                where='post', color=color, label=f'brake={lab}')
+    ax.set_xlabel('Stretch'); ax.set_ylabel('CDF')
+    ax.set_title('Stretch CDF (single broker, trial-level)')
+    ax.axvline(1.0, color=C['gray'], ls=':', alpha=0.5)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_stretch_cdf.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_stretch_cdf.png')
+
+
+def fig_crypto(d, outdir):
+    pp, ep = os.path.join(d, 'plain.csv'), os.path.join(d, 'encrypted.csv')
+    if not (os.path.exists(pp) and os.path.exists(ep)):
         return
+    pr = load_rows(pp); er = load_rows(ep)
+    plat = trial_level(pr, m_latency)
+    elat = trial_level(er, m_latency)
+    if not plat or not elat:
+        return
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+    # bar with bootstrap CI
+    ax = axes[0]
+    names = ['Plaintext', 'Encrypted']
+    means = [np.mean(plat), np.mean(elat)]
+    los = []; his = []
+    for v in (plat, elat):
+        lo, hi = boot_ci(v); los.append(lo); his.append(hi)
+    yerr = [[m - lo for m, lo in zip(means, los)], [hi - m for m, hi in zip(means, his)]]
+    ax.bar(names, means, yerr=yerr, capsize=5, color=[C['blue'], C['orange']],
+           edgecolor='black', width=0.5, error_kw={'elinewidth': 1.2})
+    ax.set_ylabel('latency_per_pub (ms)')
+    ax.set_title('(a) Delivery latency (95% bootstrap CI)')
+    ax.annotate(f'n={len(plat)} trials', xy=(0.02, 0.02), xycoords='axes fraction',
+                fontsize=9, color=C['gray'])
+    # CDF
+    ax = axes[1]
+    for data, lab, color in [(plat, 'Plaintext', C['blue']), (elat, 'Encrypted', C['orange'])]:
+        s = np.sort(data)
+        y = np.arange(1, len(s) + 1) / len(s)
+        ax.step(np.concatenate([[s[0]], s]), np.concatenate([[0.0], y]),
+                where='post', color=color, label=lab)
+    ax.set_xlabel('latency_per_pub (ms)'); ax.set_ylabel('CDF')
+    ax.set_title('(b) Latency CDF (trial-level)')
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_crypto.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_crypto.png')
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
-    
-    # Panel 1: Bar chart with mean + std
-    x_pos = np.arange(len(results))
-    means = [statistics.mean(r['lats']) for r in results]
-    stds = [statistics.stdev(r['lats']) for r in results]
-    
-    bars = ax1.bar(x_pos, means, yerr=stds, capsize=5,
-                   color=[r['color'] for r in results], edgecolor='black', linewidth=0.8, width=0.5,
-                   error_kw={'elinewidth': 1.5, 'capthick': 1.5})
-    ax1.set_ylabel('Latency (ms)')
-    ax1.set_title('(a) Mean Latency Comparison')
-    ax1.set_xticks(x_pos)
-    ax1.set_xticklabels([r['label'] for r in results])
-    ax1.set_ylim(0, max(m + s + 20 for m, s in zip(means, stds)))
-    
-    for bar, val in zip(bars, means):
-        ax1.text(bar.get_x() + bar.get_width() / 2., bar.get_height() + 5,
-                 f'{val:.1f} ms', ha='center', va='bottom', fontweight='bold', fontsize=11)
-    
-    # Panel 2: Histogram overlay
-    for r in results:
-        ax2.hist(r['lats'], bins=30, alpha=0.6, 
-                 color=r['color'], label=r['label'].replace('\n', ' '), edgecolor='black', linewidth=0.5)
-    
-    ax2.set_xlabel('Latency (ms)')
-    ax2.set_ylabel('Frequency')
-    ax2.set_title('(b) Latency Distribution')
-    ax2.legend()
-    
-    plt.tight_layout()
-    plt.savefig('phase3_crypto_comparison.png', bbox_inches='tight')
-    plt.close()
-    print("Generated: phase3_crypto_comparison.png")
 
-# ============================================================
-# Main
-# ============================================================
+def fig_dynamics_cdf(d, outdir):
+    p = os.path.join(d, 'dynamics_plain.csv')
+    if not os.path.exists(p):
+        print('fig_dynamics_cdf.png: SKIP (no dynamics_plain.csv)')
+        return
+    rows = load_rows(p)
+    closer_ms = [float(r['convergence_ms']) for r in rows
+                 if r['migration_class'] == 'closer' and r['converged'] == '1']
+    n_farther = sum(1 for r in rows if r['migration_class'] == 'farther')
+    n_farther_conv = sum(1 for r in rows if r['migration_class'] == 'farther' and r['converged'] == '1')
+
+    fig, ax = plt.subplots(figsize=(5.5, 3.5))
+    if closer_ms:
+        s = np.sort(closer_ms)
+        y = np.arange(1, len(s) + 1) / len(s)
+        ax.step(np.concatenate([[0.0], s]), np.concatenate([[0.0], y]),
+                where='post', color=C['green'], label=f'closer (n={len(closer_ms)} converged)')
+        ax.axvline(np.median(s), color=C['green'], ls=':', alpha=0.5)
+        ax.text(np.median(s), 0.5, f"median={np.median(s):.2f} ms",
+                rotation=90, va='center', ha='right', fontsize=8, color=C['green'])
+    # farther 不收敛:画一条在超时处的竖线标注,而不是空白
+    ax.axvline(0, color=C['red'], ls='-', alpha=0.8)
+    ax.annotate(f'farther: {n_farther_conv}/{n_farther} converged (design: not pushed)',
+                xy=(0.98, 0.05), xycoords='axes fraction', ha='right',
+                fontsize=9, color=C['red'])
+    ax.set_xlabel('convergence time (ms)')
+    ax.set_ylabel('CDF')
+    ax.set_title('Migration convergence CDF (closer vs farther)')
+    ax.set_xlim(left=0)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_dynamics_cdf.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_dynamics_cdf.png')
+
+
+def main():
+    d = sys.argv[1] if len(sys.argv) > 1 else 'results/final'
+    outdir = os.path.join(d, 'figures')
+    os.makedirs(outdir, exist_ok=True)
+    fig_single_brake(d, outdir)
+    fig_multi_brake(d, outdir)
+    fig_scale(d, outdir)
+    fig_stretch_cdf(d, outdir)
+    fig_crypto(d, outdir)
+    fig_dynamics_cdf(d, outdir)
+    print(f'figures written to {outdir}/')
+
+
 if __name__ == '__main__':
-    print("=== DNS++ Figure Generator ===\n")
-    plot_phase1_brake_sweep()
-    plot_phase2_multi_broker()
-    plot_phase2_scalability()
-    plot_phase3_crypto()
-    print("\nDone. Upload the generated PNG files to Overleaf.")
+    main()

@@ -1,0 +1,99 @@
+[bench-env] cpu_model=AMD Ryzen 9 8945HS w/ Radeon 780M Graphics
+[bench-env] nproc=2
+[bench-env] kernel=7.0.0-30-generic
+[bench-env] gmp=6.3.0
+[bench-env] build=Release
+[bench-env] git=not-embedded (see run_full_eval.sh env.txt)
+[bench-run] num_pubs=20 num_subs=50 brake_limit=1000 num_trials=30 seed=42 warmup=3
+[bench-net] subscriber_so_rcvbuf requested=4194304 actual=8388608
+Trial 0: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=168 braked=0 | Traffic Ratio=1.18452
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=168 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 1: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=173 braked=0 | Traffic Ratio=1.17919
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=173 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 2: recall=0.9 avg_stretch=1.00818 delivered=50/50 | Traffic: up=20 down=10 local=179 braked=0 | Traffic Ratio=1.1676
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=179 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 3: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=10 local=185 braked=0 | Traffic Ratio=1.16216
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=185 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 4: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=7 local=163 braked=0 | Traffic Ratio=1.16564
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=7 delivered_local=163 braked=0 match_calls=0 match_hits=0 pub_received=47 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 5: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=13 local=161 braked=0 | Traffic Ratio=1.20497
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=13 delivered_local=161 braked=0 match_calls=0 match_hits=0 pub_received=53 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 6: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=7 local=156 braked=0 | Traffic Ratio=1.17308
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=7 delivered_local=156 braked=0 match_calls=0 match_hits=0 pub_received=47 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 7: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=157 braked=0 | Traffic Ratio=1.19745
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=157 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 8: recall=0.98 avg_stretch=1.00365 delivered=50/50 | Traffic: up=20 down=8 local=196 braked=0 | Traffic Ratio=1.14286
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=196 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 9: recall=0.96 avg_stretch=1.02284 delivered=50/50 | Traffic: up=20 down=8 local=174 braked=0 | Traffic Ratio=1.16092
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=174 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 10: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=9 local=161 braked=0 | Traffic Ratio=1.18012
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=9 delivered_local=161 braked=0 match_calls=0 match_hits=0 pub_received=49 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 11: recall=0.98 avg_stretch=1.00304 delivered=50/50 | Traffic: up=20 down=6 local=175 braked=0 | Traffic Ratio=1.14857
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=6 delivered_local=175 braked=0 match_calls=0 match_hits=0 pub_received=46 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 12: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=10 local=162 braked=0 | Traffic Ratio=1.18519
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=162 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 13: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=7 local=172 braked=0 | Traffic Ratio=1.15698
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=7 delivered_local=172 braked=0 match_calls=0 match_hits=0 pub_received=47 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 14: recall=0.96 avg_stretch=1.00214 delivered=50/50 | Traffic: up=20 down=9 local=193 braked=0 | Traffic Ratio=1.15026
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=9 delivered_local=193 braked=0 match_calls=0 match_hits=0 pub_received=49 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 15: recall=0.94 avg_stretch=1.07033 delivered=50/50 | Traffic: up=20 down=8 local=163 braked=0 | Traffic Ratio=1.17178
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=163 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 16: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=187 braked=0 | Traffic Ratio=1.16578
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=187 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 17: recall=0.84 avg_stretch=1.18936 delivered=50/50 | Traffic: up=20 down=7 local=170 braked=0 | Traffic Ratio=1.15882
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=7 delivered_local=170 braked=0 match_calls=0 match_hits=0 pub_received=47 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 18: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=8 local=157 braked=0 | Traffic Ratio=1.17834
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=157 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 19: recall=0.96 avg_stretch=1.00971 delivered=50/50 | Traffic: up=20 down=4 local=185 braked=0 | Traffic Ratio=1.12973
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=4 delivered_local=185 braked=0 match_calls=0 match_hits=0 pub_received=44 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 20: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=10 local=164 braked=0 | Traffic Ratio=1.18293
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=164 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 21: recall=0.94 avg_stretch=1.04401 delivered=50/50 | Traffic: up=20 down=7 local=188 braked=0 | Traffic Ratio=1.14362
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=7 delivered_local=188 braked=0 match_calls=0 match_hits=0 pub_received=47 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 22: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=10 local=175 braked=0 | Traffic Ratio=1.17143
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=175 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 23: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=8 local=164 braked=0 | Traffic Ratio=1.17073
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=164 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 24: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=9 local=165 braked=0 | Traffic Ratio=1.17576
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=9 delivered_local=165 braked=0 match_calls=0 match_hits=0 pub_received=49 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 25: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=186 braked=0 | Traffic Ratio=1.16667
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=186 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 26: recall=0.96 avg_stretch=1.02237 delivered=50/50 | Traffic: up=20 down=10 local=186 braked=0 | Traffic Ratio=1.16129
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=186 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 27: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=8 local=193 braked=0 | Traffic Ratio=1.14508
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=8 delivered_local=193 braked=0 match_calls=0 match_hits=0 pub_received=48 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 28: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=11 local=178 braked=0 | Traffic Ratio=1.17416
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=11 delivered_local=178 braked=0 match_calls=0 match_hits=0 pub_received=51 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+Trial 29: recall=1 avg_stretch=1 delivered=50/50 | Traffic: up=20 down=10 local=163 braked=0 | Traffic Ratio=1.18405
+  broker stats (sum over 3/3 brokers, cumulative): forward_up=20 forward_down=10 delivered_local=163 braked=0 match_calls=0 match_hits=0 pub_received=50 sub_received=52 braked_up=0 braked_local=0
+  per-broker snapshot (root,leaf1,leaf2): sub_groups=[0,1,1] he_mode=[1,1,1]  (-1 = no STATS_DATA_EXT in response)
+[bench-net] udp_rcvbuf_errors_delta=0 udp_in_errors_delta=0 (start: rcvbuf=3507 inerr=3507; end: rcvbuf=3507 inerr=3507)

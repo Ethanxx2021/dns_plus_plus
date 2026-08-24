@@ -1,0 +1,26 @@
+wrote: results/final/env.txt
+
+=== [1/4] single-broker brake sweep ===
+done: single_brake_1.csv
+done: single_brake_2.csv
+done: single_brake_4.csv
+done: single_brake_1000.csv
+
+=== [2/4] multi-broker brake sweep ===
+done: multi_brake_1.csv
+done: multi_brake_2.csv
+done: multi_brake_4.csv
+done: multi_brake_1000.csv
+
+=== [3/4] subscriber scale sweep ===
+done: sweep_10.csv
+done: sweep_50.csv
+done: sweep_200.csv
+done: sweep_500.csv
+done: sweep_1000.csv
+
+=== [4/4] plaintext vs encrypted ===
+done: plain.csv
+done: encrypted.csv
+
+All requested outputs present under results/final/

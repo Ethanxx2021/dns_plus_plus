@@ -1,0 +1,69 @@
+[bench-env] cpu_model=AMD Ryzen 9 8945HS w/ Radeon 780M Graphics
+[bench-env] nproc=2
+[bench-env] kernel=7.0.0-30-generic
+[bench-env] gmp=6.3.0
+[bench-env] build=Release
+[bench-env] git=not-embedded (see run_full_eval.sh env.txt)
+[bench-run] broker=127.0.0.1:8080 num_pubs=10 num_subs=50 brake_limit=4 num_trials=30 seed=42 encrypted=0 warmup=3
+[bench-net] subscriber_so_rcvbuf requested=4194304 actual=8388608
+Trial 0: recall=1 avg_stretch=1 delivered=50/50 avg_latency=111.617ms avg_latency_per_pub=71.8999ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=552 braked=1 match_calls=0 match_hits=0 pub_received=40 sub_received=200 sub_groups=4 he_mode=1 braked_up=0 braked_local=1
+Trial 1: recall=1 avg_stretch=1 delivered=50/50 avg_latency=109.39ms avg_latency_per_pub=56.1297ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=690 braked=1 match_calls=0 match_hits=0 pub_received=50 sub_received=250 sub_groups=5 he_mode=1 braked_up=0 braked_local=1
+Trial 2: recall=1 avg_stretch=1 delivered=50/50 avg_latency=105.345ms avg_latency_per_pub=66.3074ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=820 braked=1 match_calls=0 match_hits=0 pub_received=60 sub_received=300 sub_groups=6 he_mode=1 braked_up=0 braked_local=1
+Trial 3: recall=1 avg_stretch=1 delivered=50/50 avg_latency=108.65ms avg_latency_per_pub=64.0183ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=966 braked=1 match_calls=0 match_hits=0 pub_received=70 sub_received=350 sub_groups=7 he_mode=1 braked_up=0 braked_local=1
+Trial 4: recall=1 avg_stretch=1 delivered=50/50 avg_latency=108.852ms avg_latency_per_pub=66.6344ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1104 braked=1 match_calls=0 match_hits=0 pub_received=80 sub_received=400 sub_groups=8 he_mode=1 braked_up=0 braked_local=1
+Trial 5: recall=1 avg_stretch=1 delivered=50/50 avg_latency=112.016ms avg_latency_per_pub=68.8515ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1239 braked=1 match_calls=0 match_hits=0 pub_received=90 sub_received=450 sub_groups=9 he_mode=1 braked_up=0 braked_local=1
+Trial 6: recall=1 avg_stretch=1 delivered=50/50 avg_latency=114.139ms avg_latency_per_pub=70.5031ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1371 braked=1 match_calls=0 match_hits=0 pub_received=100 sub_received=500 sub_groups=10 he_mode=1 braked_up=0 braked_local=1
+Trial 7: recall=0.96 avg_stretch=1.01574 delivered=50/50 avg_latency=108.572ms avg_latency_per_pub=74.2263ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1504 braked=2 match_calls=0 match_hits=0 pub_received=110 sub_received=550 sub_groups=7 he_mode=1 braked_up=0 braked_local=2
+Trial 8: recall=1 avg_stretch=1 delivered=50/50 avg_latency=107.583ms avg_latency_per_pub=57.3539ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1668 braked=2 match_calls=0 match_hits=0 pub_received=120 sub_received=600 sub_groups=8 he_mode=1 braked_up=0 braked_local=2
+Trial 9: recall=1 avg_stretch=1 delivered=50/50 avg_latency=107.769ms avg_latency_per_pub=67.5856ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1816 braked=2 match_calls=0 match_hits=0 pub_received=130 sub_received=650 sub_groups=9 he_mode=1 braked_up=0 braked_local=2
+Trial 10: recall=1 avg_stretch=1 delivered=50/50 avg_latency=113.318ms avg_latency_per_pub=65.8451ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=1947 braked=2 match_calls=0 match_hits=0 pub_received=140 sub_received=700 sub_groups=10 he_mode=1 braked_up=0 braked_local=2
+Trial 11: recall=0.96 avg_stretch=1.00736 delivered=50/50 avg_latency=104.65ms avg_latency_per_pub=53.504ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2092 braked=3 match_calls=0 match_hits=0 pub_received=150 sub_received=750 sub_groups=11 he_mode=1 braked_up=0 braked_local=3
+Trial 12: recall=0.88 avg_stretch=1.06185 delivered=50/50 avg_latency=106.921ms avg_latency_per_pub=84.2793ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2210 braked=6 match_calls=0 match_hits=0 pub_received=160 sub_received=800 sub_groups=7 he_mode=1 braked_up=0 braked_local=6
+Trial 13: recall=1 avg_stretch=1 delivered=50/50 avg_latency=124.159ms avg_latency_per_pub=46.6173ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2356 braked=6 match_calls=0 match_hits=0 pub_received=170 sub_received=850 sub_groups=8 he_mode=1 braked_up=0 braked_local=6
+Trial 14: recall=1 avg_stretch=1 delivered=50/50 avg_latency=107.85ms avg_latency_per_pub=63.3283ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2519 braked=6 match_calls=0 match_hits=0 pub_received=180 sub_received=900 sub_groups=9 he_mode=1 braked_up=0 braked_local=6
+Trial 15: recall=1 avg_stretch=1 delivered=50/50 avg_latency=106.714ms avg_latency_per_pub=59.826ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2658 braked=6 match_calls=0 match_hits=0 pub_received=190 sub_received=950 sub_groups=10 he_mode=1 braked_up=0 braked_local=6
+Trial 16: recall=1 avg_stretch=1 delivered=50/50 avg_latency=110.071ms avg_latency_per_pub=69.1125ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2804 braked=6 match_calls=0 match_hits=0 pub_received=200 sub_received=1000 sub_groups=11 he_mode=1 braked_up=0 braked_local=6
+Trial 17: recall=1 avg_stretch=1 delivered=50/50 avg_latency=105.812ms avg_latency_per_pub=61.3585ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=2946 braked=6 match_calls=0 match_hits=0 pub_received=210 sub_received=1050 sub_groups=7 he_mode=1 braked_up=0 braked_local=6
+Trial 18: recall=1 avg_stretch=1 delivered=50/50 avg_latency=111.892ms avg_latency_per_pub=64.1127ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3089 braked=6 match_calls=0 match_hits=0 pub_received=220 sub_received=1100 sub_groups=8 he_mode=1 braked_up=0 braked_local=6
+Trial 19: recall=0.98 avg_stretch=1.00333 delivered=50/50 avg_latency=109.746ms avg_latency_per_pub=51.1643ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3261 braked=7 match_calls=0 match_hits=0 pub_received=230 sub_received=1150 sub_groups=9 he_mode=1 braked_up=0 braked_local=7
+Trial 20: recall=1 avg_stretch=1 delivered=50/50 avg_latency=112.342ms avg_latency_per_pub=59.088ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3402 braked=7 match_calls=0 match_hits=0 pub_received=240 sub_received=1200 sub_groups=10 he_mode=1 braked_up=0 braked_local=7
+Trial 21: recall=0.88 avg_stretch=1.18064 delivered=50/50 avg_latency=112.918ms avg_latency_per_pub=54.8088ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3563 braked=8 match_calls=0 match_hits=0 pub_received=250 sub_received=1250 sub_groups=11 he_mode=1 braked_up=0 braked_local=8
+Trial 22: recall=1 avg_stretch=1 delivered=50/50 avg_latency=107.8ms avg_latency_per_pub=61.7117ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3711 braked=8 match_calls=0 match_hits=0 pub_received=260 sub_received=1300 sub_groups=7 he_mode=1 braked_up=0 braked_local=8
+Trial 23: recall=1 avg_stretch=1 delivered=50/50 avg_latency=114.133ms avg_latency_per_pub=60.2788ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3837 braked=8 match_calls=0 match_hits=0 pub_received=270 sub_received=1350 sub_groups=8 he_mode=1 braked_up=0 braked_local=8
+Trial 24: recall=1 avg_stretch=1 delivered=50/50 avg_latency=111.378ms avg_latency_per_pub=65.4878ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=3977 braked=8 match_calls=0 match_hits=0 pub_received=280 sub_received=1400 sub_groups=9 he_mode=1 braked_up=0 braked_local=8
+Trial 25: recall=0.82 avg_stretch=1.13365 delivered=50/50 avg_latency=110.674ms avg_latency_per_pub=72.6091ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=4115 braked=11 match_calls=0 match_hits=0 pub_received=290 sub_received=1450 sub_groups=10 he_mode=1 braked_up=0 braked_local=11
+Trial 26: recall=1 avg_stretch=1 delivered=50/50 avg_latency=108.271ms avg_latency_per_pub=61.6157ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=4283 braked=11 match_calls=0 match_hits=0 pub_received=300 sub_received=1500 sub_groups=11 he_mode=1 braked_up=0 braked_local=11
+Trial 27: recall=1 avg_stretch=1 delivered=50/50 avg_latency=110.64ms avg_latency_per_pub=64.6776ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=4438 braked=11 match_calls=0 match_hits=0 pub_received=310 sub_received=1550 sub_groups=7 he_mode=1 braked_up=0 braked_local=11
+Trial 28: recall=1 avg_stretch=1 delivered=50/50 avg_latency=114.472ms avg_latency_per_pub=63.4025ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=4582 braked=11 match_calls=0 match_hits=0 pub_received=320 sub_received=1600 sub_groups=8 he_mode=1 braked_up=0 braked_local=11
+Trial 29: recall=1 avg_stretch=1 delivered=50/50 avg_latency=110.702ms avg_latency_per_pub=60.9647ms (Plaintext)
+  broker stats (cumulative): forward_up=0 forward_down=0 delivered_local=4719 braked=11 match_calls=0 match_hits=0 pub_received=330 sub_received=1650 sub_groups=9 he_mode=1 braked_up=0 braked_local=11
+[bench-net] udp_rcvbuf_errors_delta=0 udp_in_errors_delta=0 (start: rcvbuf=3507 inerr=3507; end: rcvbuf=3507 inerr=3507)
