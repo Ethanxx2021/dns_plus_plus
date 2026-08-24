@@ -9,30 +9,54 @@ void Heps::init() {
     mu_ = paillier_.getMu();
 }
 
-void Heps::loadState(const std::string& filename) {
+bool Heps::loadState(const std::string& filename) {
     std::ifstream ifs(filename);
-    std::string n_hex, mu_hex, lambda_hex, e_m_hex, d_m_hex, r_m_hex;
-    
-    if (std::getline(ifs, n_hex) &&
-        std::getline(ifs, mu_hex) &&
-        std::getline(ifs, lambda_hex) &&
-        std::getline(ifs, e_m_hex) &&
-        std::getline(ifs, d_m_hex) &&
-        std::getline(ifs, r_m_hex)) {
-        
-        mpz_class n_val = hexToMpz(n_hex);
-        mpz_class mu_val = hexToMpz(mu_hex);
-        mpz_class lambda_val = hexToMpz(lambda_hex);
-        mpz_class e_m_val = hexToMpz(e_m_hex);
-        mpz_class d_m_val = hexToMpz(d_m_hex);
-        mpz_class r_m_val = hexToMpz(r_m_hex);
-        
-        paillier_.setParams(n_val, n_val + 1, mu_val, lambda_val, e_m_val, d_m_val, r_m_val);
-        n_ = n_val;
-        mu_ = mu_val;
-    } else {
-        std::cerr << "Error: Could not load HEPS state from " << filename << std::endl;
+    if (!ifs.is_open()) {
+        std::cerr << "Heps::loadState: cannot open " << filename
+                  << " (file does not exist or is not readable)" << std::endl;
+        return false;
     }
+
+    // 期望 6 行: n, mu, lambda, e_m, d_m, r_m
+    std::string n_hex, mu_hex, lambda_hex, e_m_hex, d_m_hex, r_m_hex;
+    if (!(std::getline(ifs, n_hex) &&
+          std::getline(ifs, mu_hex) &&
+          std::getline(ifs, lambda_hex) &&
+          std::getline(ifs, e_m_hex) &&
+          std::getline(ifs, d_m_hex) &&
+          std::getline(ifs, r_m_hex))) {
+        std::cerr << "Heps::loadState: " << filename
+                  << " is truncated (need 6 hex lines: n, mu, lambda, e_m, d_m, r_m)"
+                  << std::endl;
+        return false;
+    }
+    // 检查是否有多余行 —— 多出的行往往意味着格式漂移，值得报出来
+    std::string extra;
+    if (std::getline(ifs, extra) && !extra.empty()) {
+        std::cerr << "Heps::loadState: " << filename
+                  << " has extra content after the 6 expected lines" << std::endl;
+        return false;
+    }
+
+    // 全部 hex 解析后一次性写入，避免部分成功后成员处于不一致状态
+    mpz_class n_val      = hexToMpz(n_hex);
+    mpz_class mu_val     = hexToMpz(mu_hex);
+    mpz_class lambda_val = hexToMpz(lambda_hex);
+    mpz_class e_m_val    = hexToMpz(e_m_hex);
+    mpz_class d_m_val    = hexToMpz(d_m_hex);
+    mpz_class r_m_val    = hexToMpz(r_m_hex);
+
+    if (n_val == 0) {
+        std::cerr << "Heps::loadState: " << filename
+                  << " has n == 0 (would cause a divide-by-zero downstream)"
+                  << std::endl;
+        return false;
+    }
+
+    paillier_.setParams(n_val, n_val + 1, mu_val, lambda_val, e_m_val, d_m_val, r_m_val);
+    n_ = n_val;
+    mu_ = mu_val;
+    return true;
 }
 
 mpz_class Heps::stringToMpz(const std::string& s) const {

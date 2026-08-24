@@ -3,9 +3,13 @@
 #include <cstring>
 #include <sstream>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <cstdio>
+#include <cstdlib>
 #include <errno.h>
 #include <cmath>
 #include <endian.h>
@@ -126,10 +130,25 @@ DnsMulticastBroker::~DnsMulticastBroker() {
 // ============================================================
 // Phase 3: Crypto Initialization
 // ============================================================
+// 以 0600 打开一个文件用于写入，返回 FILE*（供 fprintf 使用）。
+// 用 open(O_CREAT, 0600) + fdopen 而不是 std::ofstream，因为 ofstream 走 fopen("w")
+// 会得到默认 0644 权限（受 umask 影响，通常仍是世界可读）。审计 Q6：私钥材料
+// 落进世界可读的 /tmp 是硬伤，本函数把这一半修好；架构级 HEPS 分离不在本 PR 范围。
+static FILE* openKeyFile600(const std::string& path) {
+    // 先删旧文件：open(O_CREAT) 不改现有文件的权限，而现有文件很可能是上一轮
+    // 遗留的 0644，直接改权限也可以，unlink 更简单且不留竞态。
+    unlink(path.c_str());
+    int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return nullptr;
+    FILE* f = fdopen(fd, "w");
+    if (!f) { ::close(fd); return nullptr; }
+    return f;
+}
+
 void DnsMulticastBroker::initCrypto() {
     std::string key_file = "/tmp/dnspp_heps.key";
     std::string full_key_file = "/tmp/dnspp_heps_full.key";
-    
+
     if (!has_parent_) {
         Paillier p;
         p.keyGen(2048);
@@ -139,34 +158,69 @@ void DnsMulticastBroker::initCrypto() {
         he_enabled_ = true;
         he_key_source_ = "generated(root)";
 
-        // Save public key for leaf brokers
-        std::ofstream ofs(key_file);
-        ofs << mpzToHex(he_n_) << "\n";
-        ofs << mpzToHex(he_mu_) << "\n";
-        ofs.close();
+        // Save public key for leaf brokers (mode 0600)
+        FILE* pubf = openKeyFile600(key_file);
+        if (!pubf) {
+            std::cerr << "FATAL: cannot write " << key_file
+                      << " with mode 0600: " << strerror(errno) << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        fprintf(pubf, "%s\n", mpzToHex(he_n_).c_str());
+        fprintf(pubf, "%s\n", mpzToHex(he_mu_).c_str());
+        fclose(pubf);
 
-        // Save full state for clients (acting as HEPS proxy for blinding)
-        std::ofstream ofs_full(full_key_file);
-        ofs_full << mpzToHex(p.getN()) << "\n";
-        ofs_full << mpzToHex(p.getMu()) << "\n";
-        ofs_full << mpzToHex(p.getLambda()) << "\n";
-        ofs_full << mpzToHex(p.getEM()) << "\n";
-        ofs_full << mpzToHex(p.getDM()) << "\n";
-        ofs_full << mpzToHex(p.getRM()) << "\n";
-        ofs_full.close();
+        // Save full state for clients (acting as HEPS proxy for blinding) (mode 0600)
+        // 这个文件带完整私钥材料 (lambda/e_m/d_m/r_m)，权限必须 0600。
+        // 长期方案是拆独立 HEPS 进程 (audit Q6)，不在本 PR 范围。
+        FILE* fullf = openKeyFile600(full_key_file);
+        if (!fullf) {
+            std::cerr << "FATAL: cannot write " << full_key_file
+                      << " with mode 0600: " << strerror(errno) << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        fprintf(fullf, "%s\n", mpzToHex(p.getN()).c_str());
+        fprintf(fullf, "%s\n", mpzToHex(p.getMu()).c_str());
+        fprintf(fullf, "%s\n", mpzToHex(p.getLambda()).c_str());
+        fprintf(fullf, "%s\n", mpzToHex(p.getEM()).c_str());
+        fprintf(fullf, "%s\n", mpzToHex(p.getDM()).c_str());
+        fprintf(fullf, "%s\n", mpzToHex(p.getRM()).c_str());
+        fclose(fullf);
     } else {
-        // Leaf Broker: Read public key from file
+        // Leaf Broker: Read public key from file.
+        // 旧行为：读失败 -> 打印 warning 后 he_enabled_=false 继续跑（CLAUDE.md I6
+        // 明确禁止的静默降级）。新行为：require_he 决定 fail-fast 还是显式退化。
         std::ifstream ifs(key_file);
         std::string n_hex, mu_hex;
-        if (std::getline(ifs, n_hex) && std::getline(ifs, mu_hex)) {
-            he_n_ = hexToMpz(n_hex);
-            he_mu_ = hexToMpz(mu_hex);
-            he_n_sq_ = he_n_ * he_n_;
-            he_enabled_ = true;
-            he_key_source_ = key_file;
-        } else {
-            std::cerr << "Warning: Could not read HEPS key file. Running in plaintext mode." << std::endl;
+        bool ok = static_cast<bool>(ifs) &&
+                  std::getline(ifs, n_hex) && std::getline(ifs, mu_hex);
+        if (ok) {
+            mpz_class n_val = hexToMpz(n_hex);
+            if (n_val == 0) ok = false;   // 全 0 的 n 会让下游 GMP 直接 SIGFPE
+            if (ok) {
+                he_n_ = n_val;
+                he_mu_ = hexToMpz(mu_hex);
+                he_n_sq_ = he_n_ * he_n_;
+                he_enabled_ = true;
+                he_key_source_ = key_file;
+            }
+        }
+        if (!ok) {
+            if (config_.require_he) {
+                std::cerr << "FATAL: [Broker " << config_.broker_id << "] "
+                          << "require_he=true but HEPS key file " << key_file
+                          << " is missing or malformed. "
+                          << "Start the root broker first, or set require_he=false "
+                          << "in this leaf's config to allow plaintext fallback."
+                          << std::endl;
+                exit(EXIT_FAILURE);
+            }
             he_enabled_ = false;
+            // 醒目的一行 WARNING，走 logger 而不是 cerr —— cerr 单行容易被 broker
+            // 启动过程中的 UDP hello/hello_ack 日志淹没，MODE 行之后一起被读到。
+            logger.pushLog(std::string("[Broker ") + config_.broker_id +
+                           "] WARNING: HE key unavailable, running in PLAINTEXT mode "
+                           "(require_he=false; " + key_file +
+                           " missing or malformed)");
         }
     }
 }

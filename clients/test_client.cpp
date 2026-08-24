@@ -62,19 +62,17 @@ int main(int argc, char* argv[]) {
     inet_pton(AF_INET, broker_ip.c_str(), &broker_addr.sin_addr);
 
     // Initialize HEPS
-    // 加密模式下密钥必须存在：读不到就 fail-fast，不要退回明文，也不要让
-    // Heps::loadState() 留下一组全 0 的参数再在 GMP 里炸掉（CLAUDE.md I6）。
+    // 加密模式下密钥必须存在：现在直接看 Heps::loadState 的返回值 fail-fast，
+    // 不再依赖前置探测。旧路径遇到密钥缺失会让 n_/mu_ 停在默认构造的 0，随后
+    // blindSubscription() 在 GMP 里对 0 取模崩溃（SIGFPE，退出码 136，PR #1 实测）。
     Heps heps;
     if (encrypt && mode != "beat") {
-        std::ifstream key_probe(KEY_FILE);
-        if (!key_probe.is_open()) {
-            std::cerr << "FATAL: cannot read HEPS key file " << KEY_FILE << "\n"
-                      << "       start the root broker first (it writes this file), or pass"
-                      << " --plaintext to run without blinding.\n";
+        if (!heps.loadState(KEY_FILE)) {
+            std::cerr << "FATAL: cannot load HEPS key from " << KEY_FILE << "\n"
+                      << "       start the root broker first (it writes this file),\n"
+                      << "       or pass --plaintext to run without blinding.\n";
             return EXIT_FAILURE;
         }
-        key_probe.close();
-        heps.loadState(KEY_FILE);
     }
 
     if (mode == "sub") {

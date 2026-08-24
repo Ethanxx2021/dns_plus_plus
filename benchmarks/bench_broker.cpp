@@ -117,7 +117,12 @@ int main(int argc, char* argv[]) {
 
     Heps heps;
     if (encrypted) {
-        heps.loadState("/tmp/dnspp_heps_full.key");
+        if (!heps.loadState("/tmp/dnspp_heps_full.key")) {
+            std::cerr << "FATAL: cannot load HEPS key file. "
+                      << "Start the root broker first, or pass encrypted=0."
+                      << std::endl;
+            return EXIT_FAILURE;
+        }
     }
 
     struct sockaddr_in broker_addr{};
