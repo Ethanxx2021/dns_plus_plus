@@ -1,30 +1,30 @@
 DNS++ 正式实验结果汇总 (results dir: results/final)
-bootstrap: 10000 resamples, 95% percentile CI; RNG seed fixed
+bootstrap: 10000 resamples, 95% percentile CI; stable per-value seed
 
 ======================================================================
 单 broker brake sweep (10 pub / 50 sub)
   brake_limit=1:
-    recall: n=30 mean=0.4520 [0.4040, 0.4987]
+    recall: n=30 mean=0.4520 [0.4053, 0.4987]
     median=0.4400 p95=0.6600 p99=0.6884
-    stretch: n=30 mean=2.1720 [1.9697, 2.3844]
+    stretch: n=30 mean=2.1720 [1.9699, 2.3845]
     median=2.0029 p95=3.1875 p99=3.5361
-    latency_per_pub(ms): n=30 mean=1046.9609 [583.6609, 1585.8853]
+    latency_per_pub(ms): n=30 mean=1046.9609 [589.4554, 1579.6439]
     median=135.0614 p95=3346.4451 p99=5306.5044
     STATS: pub_received=330.0 braked_local=206.0 braked_up=0.0 suppression=0.6242
   brake_limit=2:
-    recall: n=30 mean=0.7493 [0.6987, 0.7967]
+    recall: n=30 mean=0.7493 [0.6993, 0.7967]
     median=0.7600 p95=0.9000 p99=0.9426
-    stretch: n=30 mean=1.3733 [1.2616, 1.4963]
+    stretch: n=30 mean=1.3733 [1.2613, 1.4968]
     median=1.2124 p95=1.9639 p99=2.1645
-    latency_per_pub(ms): n=30 mean=721.8019 [463.6022, 1016.4590]
+    latency_per_pub(ms): n=30 mean=721.8019 [461.5566, 1019.6375]
     median=470.5860 p95=1695.0384 p99=2958.5344
     STATS: pub_received=330.0 braked_local=106.0 braked_up=0.0 suppression=0.3212
   brake_limit=4:
     recall: n=30 mean=0.9827 [0.9653, 0.9960]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0134 [1.0010, 1.0295]
+    stretch: n=30 mean=1.0134 [1.0011, 1.0296]
     median=1.0000 p95=1.1013 p99=1.1670
-    latency_per_pub(ms): n=30 mean=710.7298 [461.2851, 978.6718]
+    latency_per_pub(ms): n=30 mean=710.7298 [460.1071, 983.5667]
     median=333.3886 p95=2027.7320 p99=2314.9948
     STATS: pub_received=330.0 braked_local=11.0 braked_up=0.0 suppression=0.0333
   brake_limit=1000:
@@ -32,41 +32,41 @@ bootstrap: 10000 resamples, 95% percentile CI; RNG seed fixed
     median=1.0000 p95=1.0000 p99=1.0000
     stretch: n=30 mean=1.0000 [1.0000, 1.0000]
     median=1.0000 p95=1.0000 p99=1.0000
-    latency_per_pub(ms): n=30 mean=78.6362 [74.5030, 82.7897]
+    latency_per_pub(ms): n=30 mean=78.6362 [74.4716, 82.7510]
     median=79.1535 p95=95.5215 p99=96.5549
     STATS: pub_received=330.0 braked_local=0.0 braked_up=0.0 suppression=0.0000
 ======================================================================
 多 broker brake sweep (20 pub / 50 sub / 3 broker)
   brake_limit=1:
-    recall: n=30 mean=0.2273 [0.2013, 0.2533]
+    recall: n=30 mean=0.2273 [0.2007, 0.2533]
     median=0.2400 p95=0.3400 p99=0.3542
-    stretch: n=30 mean=3.3313 [3.0363, 3.6456]
+    stretch: n=30 mean=3.3313 [3.0376, 3.6396]
     median=3.0325 p95=4.9051 p99=4.9596
-    traffic_ratio: n=30 mean=1.0868 [1.0815, 1.0919]
+    traffic_ratio: n=30 mean=1.0868 [1.0816, 1.0919]
     median=1.0841 p95=1.1095 p99=1.1120
     STATS: pub_received=30.0 braked_local=17.0 braked_up=15.0 suppression=1.0667
   brake_limit=2:
     recall: n=30 mean=0.4580 [0.4240, 0.4933]
     median=0.4600 p95=0.6000 p99=0.6710
-    stretch: n=30 mean=2.0865 [1.8886, 2.2986]
+    stretch: n=30 mean=2.0865 [1.8847, 2.3011]
     median=2.0187 p95=3.1765 p99=3.5190
     traffic_ratio: n=30 mean=1.1094 [1.1043, 1.1149]
     median=1.1095 p95=1.1303 p99=1.1494
     STATS: pub_received=35.0 braked_local=12.0 braked_up=11.0 suppression=0.6571
   brake_limit=4:
-    recall: n=30 mean=0.7787 [0.7527, 0.8053]
+    recall: n=30 mean=0.7787 [0.7513, 0.8053]
     median=0.7800 p95=0.9200 p99=0.9200
-    stretch: n=30 mean=1.3179 [1.2357, 1.4099]
+    stretch: n=30 mean=1.3179 [1.2365, 1.4094]
     median=1.2658 p95=1.8068 p99=2.0580
-    traffic_ratio: n=30 mean=1.1421 [1.1357, 1.1480]
+    traffic_ratio: n=30 mean=1.1421 [1.1359, 1.1480]
     median=1.1441 p95=1.1657 p99=1.1681
     STATS: pub_received=43.0 braked_local=6.0 braked_up=5.0 suppression=0.2558
   brake_limit=1000:
-    recall: n=30 mean=0.9807 [0.9667, 0.9920]
+    recall: n=30 mean=0.9807 [0.9660, 0.9920]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0125 [1.0027, 1.0274]
+    stretch: n=30 mean=1.0125 [1.0026, 1.0274]
     median=1.0000 p95=1.0585 p99=1.1548
-    traffic_ratio: n=30 mean=1.1680 [1.1622, 1.1739]
+    traffic_ratio: n=30 mean=1.1680 [1.1621, 1.1739]
     median=1.1692 p95=1.1919 p99=1.2028
     STATS: pub_received=50.0 braked_local=0.0 braked_up=0.0 suppression=0.0000
 ======================================================================
@@ -80,42 +80,42 @@ bootstrap: 10000 resamples, 95% percentile CI; RNG seed fixed
   subs=50:
     recall: n=30 mean=0.9827 [0.9653, 0.9960]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0134 [1.0010, 1.0295]
+    stretch: n=30 mean=1.0134 [1.0011, 1.0296]
     median=1.0000 p95=1.1013 p99=1.1670
     UDP: rcvbuf_errors_delta=0 in_errors_delta=0
   subs=200:
-    recall: n=30 mean=0.9823 [0.9662, 0.9955]
+    recall: n=30 mean=0.9823 [0.9660, 0.9952]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0142 [1.0040, 1.0269]
+    stretch: n=30 mean=1.0142 [1.0040, 1.0262]
     median=1.0000 p95=1.0903 p99=1.1110
     UDP: rcvbuf_errors_delta=0 in_errors_delta=0
   subs=500:
-    recall: n=30 mean=0.8789 [0.8123, 0.9381]
+    recall: n=30 mean=0.8789 [0.8113, 0.9391]
     median=0.9880 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0175 [1.0049, 1.0325]
+    stretch: n=30 mean=1.0175 [1.0051, 1.0327]
     median=1.0000 p95=1.1153 p99=1.1223
     UDP: rcvbuf_errors_delta=1818 in_errors_delta=1818
   subs=1000:
-    recall: n=30 mean=0.8327 [0.7460, 0.9051]
+    recall: n=30 mean=0.8327 [0.7469, 0.9042]
     median=0.8990 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0167 [1.0048, 1.0305]
+    stretch: n=30 mean=1.0167 [1.0049, 1.0310]
     median=1.0000 p95=1.1070 p99=1.1198
     UDP: rcvbuf_errors_delta=4963 in_errors_delta=4963
 ======================================================================
 明文 vs 加密 (10 pub / 50 sub / brake=4)
   明文:
-    recall: n=30 mean=0.9827 [0.9660, 0.9960]
+    recall: n=30 mean=0.9827 [0.9653, 0.9960]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0134 [1.0010, 1.0297]
+    stretch: n=30 mean=1.0134 [1.0011, 1.0296]
     median=1.0000 p95=1.1013 p99=1.1670
-    latency_per_pub(ms): n=30 mean=63.5787 [60.3299, 67.1301]
+    latency_per_pub(ms): n=30 mean=63.5787 [60.2671, 67.1746]
     median=62.5584 p95=81.1913 p99=89.0828
   加密:
-    recall: n=30 mean=0.9827 [0.9660, 0.9960]
+    recall: n=30 mean=0.9827 [0.9653, 0.9960]
     median=1.0000 p95=1.0000 p99=1.0000
-    stretch: n=30 mean=1.0134 [1.0011, 1.0304]
+    stretch: n=30 mean=1.0134 [1.0011, 1.0296]
     median=1.0000 p95=1.1013 p99=1.1670
-    latency_per_pub(ms): n=30 mean=63.4043 [60.5995, 66.3007]
+    latency_per_pub(ms): n=30 mean=63.4043 [60.5354, 66.3753]
     median=63.0253 p95=74.6232 p99=84.5643
   配对 Wilcoxon signed-rank(加密 - 明文 latency_per_pub):
     n_pairs=30 W=182.0 z=-1.039 p=0.2989 median_diff(enc-plain)=0.377 ms
@@ -125,7 +125,7 @@ bootstrap: 10000 resamples, 95% percentile CI; RNG seed fixed
 dynamics: 副本迁移收敛 (20 pub / 50 sub / 20 migrations)
   closer:  records=1036
     convergence rate=0.9633 (998/1036)
-    convergence_ms (trial-level mean): n=30 mean=0.5616 [0.4412, 0.6947]
+    convergence_ms (trial-level mean): n=30 mean=0.5616 [0.4433, 0.6889]
     median=0.4242 p95=1.2433 p99=1.3766
   farther: records=1391
     convergence rate=0.0000 (0/1391)

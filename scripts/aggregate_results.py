@@ -2,96 +2,19 @@
 """
 aggregate_results.py — 汇总 results/final/ 下的正式实验数据。
 
-产出两份文件(写到 results/final/):
-  summary.txt   人读的统计汇总(mean + bootstrap 95% CI,配对检验 p 值等)
-  numbers.tex   LaTeX 宏定义,论文直接 \\input
-
-统计方法(对应评分标准 "statistical significance"):
-  1. 95% 置信区间用 bootstrap(percentile,10000 次),不是 mean ± std。
-  2. 有界指标(recall∈[0,1]、stretch≥1)自然用 bootstrap percentile CI,不会越界。
-  3. plaintext vs encrypted 用 Wilcoxon signed-rank 配对检验(按 trial 配对)。
-  4. p95/p99 用 trial 级别的分布(先 per-trial 聚合,再对 trial 求分位数),
-     不把同一 trial 内强相关的 subscriber 当独立样本 pooled。
-  5. 每组都报 n(trial 数)。
+统计工具在 bench_stats.py(共享),本脚本只做各实验的汇总编排。
+产出 results/final/{summary.txt, numbers.tex}。
 
 用法: venv/bin/python scripts/aggregate_results.py [results_dir]
 """
-import csv
-import math
 import os
-import re
 import sys
 
 import numpy as np
 
-RNG = np.random.default_rng(20260824)   # bootstrap 固定种子,可复现
-N_BOOT = 10000
-ALPHA = 0.05
-
-
-# --------------------------------------------------------------------------
-# 基础统计工具
-# --------------------------------------------------------------------------
-def load_rows(path):
-    with open(path, newline='') as f:
-        return list(csv.DictReader(f))
-
-
-def trial_level(rows, metric):
-    """把逐 subscriber 行聚合成 trial 级(每个 trial 一个均值)。"""
-    by = {}
-    for r in rows:
-        v = metric(r)
-        if v is None:
-            continue
-        by.setdefault(int(r['trial']), []).append(v)
-    return [sum(v) / len(v) for v in by.values() if v]
-
-
-def mean_ci(values):
-    v = np.asarray(values, dtype=float)
-    m = float(v.mean())
-    boot = RNG.choice(v, size=(N_BOOT, len(v)), replace=True).mean(axis=1)
-    lo, hi = float(np.percentile(boot, 100 * ALPHA / 2)), float(np.percentile(boot, 100 * (1 - ALPHA / 2)))
-    return m, lo, hi
-
-
-def pctl(values, p):
-    v = np.asarray(values, dtype=float)
-    return float(np.percentile(v, p))
-
-
-def normal_cdf(x):
-    return 0.5 * math.erfc(-x / math.sqrt(2.0))
-
-
-def wilcoxon_signed_rank(x, y):
-    """配对 Wilcoxon signed-rank(手写,不依赖 scipy)。返回 (W, p, n, z)。"""
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    d = x - y
-    d = d[np.isfinite(d) & (d != 0)]
-    n = len(d)
-    if n == 0:
-        return 0.0, 1.0, 0, 0.0
-    absd = np.abs(d)
-    order = np.argsort(absd)
-    ranks = np.empty(n, dtype=float)
-    i = 0
-    while i < n:
-        j = i
-        while j < n and absd[order[j]] == absd[order[i]]:
-            j += 1
-        ranks[order[i:j]] = (i + j + 1) / 2.0   # 平均秩(1-based)
-        i = j
-    wp = ranks[d > 0].sum()
-    wm = ranks[d < 0].sum()
-    w = min(wp, wm)
-    mu = n * (n + 1) / 4.0
-    sigma = math.sqrt(n * (n + 1) * (2 * n + 1) / 24.0)
-    z = (w - mu) / sigma if sigma > 0 else 0.0
-    p = 2.0 * (1.0 - normal_cdf(abs(z)))
-    return w, p, n, z
+from bench_stats import (load_rows, trial_level, mean_ci, pctl,
+                         wilcoxon_signed_rank, m_recall, m_stretch, m_latency,
+                         last_broker_stats, traffic_ratios, udp_deltas)
 
 
 def f(x, nd=4):
@@ -102,77 +25,6 @@ def ci_str(m, lo, hi, nd=4):
     return f"{f(m, nd)} [{f(lo, nd)}, {f(hi, nd)}]"
 
 
-# --------------------------------------------------------------------------
-# 指标提取器(CSV 列)
-# --------------------------------------------------------------------------
-def m_recall(r):
-    return float(r['recall'])
-
-
-def m_stretch(r):
-    s = float(r['stretch'])
-    return s if s > 0 else None          # stretch<0 表示未收到,跳过
-
-
-def m_latency(r):
-    v = float(r['latency_per_pub_ms'])
-    return v if v >= 0 else None
-
-
-# --------------------------------------------------------------------------
-# 日志解析
-# --------------------------------------------------------------------------
-def parse_kv_line(line):
-    """把 'a=1 b=2.3 c=-1' 解析成 {a:1.0, b:2.3, c:-1.0}。"""
-    out = {}
-    for tok in line.split():
-        if '=' in tok:
-            k, v = tok.split('=', 1)
-            try:
-                out[k] = float(v)
-            except ValueError:
-                out[k] = v
-    return out
-
-
-def last_broker_stats(log_path):
-    """取 .log 里最后一行 broker stats(累计量)。"""
-    last = None
-    with open(log_path, errors='replace') as f:
-        for line in f:
-            if 'broker stats' in line and 'cumulative' in line:
-                last = line
-    if last is None:
-        return {}
-    return parse_kv_line(last)
-
-
-def traffic_ratios(log_path):
-    """多 broker 每个 trial 的 Traffic Ratio。"""
-    out = []
-    with open(log_path, errors='replace') as f:
-        for line in f:
-            if line.startswith('Trial') and 'Traffic Ratio=' in line:
-                m = re.search(r'Traffic Ratio=([0-9.]+)', line)
-                if m:
-                    out.append(float(m.group(1)))
-    return out
-
-
-def udp_deltas(log_path):
-    """取 [bench-net] udp_rcvbuf_errors_delta / udp_in_errors_delta。"""
-    rc = inc = None
-    with open(log_path, errors='replace') as f:
-        for line in f:
-            m = re.search(r'udp_rcvbuf_errors_delta=(\d+) udp_in_errors_delta=(\d+)', line)
-            if m:
-                rc, inc = int(m.group(1)), int(m.group(2))
-    return rc, inc
-
-
-# --------------------------------------------------------------------------
-# 汇总结果容器
-# --------------------------------------------------------------------------
 class Summary:
     def __init__(self):
         self.lines = []
@@ -186,7 +38,6 @@ class Summary:
 
 
 def report_metric(S, label, values, nd=4, pcts=True):
-    """对 trial 级 values 报 mean + bootstrap 95% CI(以及可选 p95/p99)。返回 (m,lo,hi)。"""
     if not values:
         S.line(f"{label}: n=0 (no data)")
         return None, None, None
@@ -198,9 +49,6 @@ def report_metric(S, label, values, nd=4, pcts=True):
     return m, lo, hi
 
 
-# --------------------------------------------------------------------------
-# 各实验统计
-# --------------------------------------------------------------------------
 def single_brake(S, d, tex_prefix):
     S.line("=" * 70)
     S.line("单 broker brake sweep (10 pub / 50 sub)")
@@ -216,7 +64,6 @@ def single_brake(S, d, tex_prefix):
         rm, rlo, rhi = report_metric(S, "    recall", rec)
         sm, slo, shi = report_metric(S, "    stretch", st)
         report_metric(S, "    latency_per_pub(ms)", lat)
-        # 统计计数器:suppression
         st_log = last_broker_stats(os.path.join(d, f"single_brake_{L}.log"))
         pr = st_log.get('pub_received', 0)
         bl = st_log.get('braked_local', 0)
@@ -310,7 +157,6 @@ def plain_encrypted(S, d):
     report_metric(S, "    stretch", est)
     report_metric(S, "    latency_per_pub(ms)", elat)
 
-    # 配对检验(按 trial 配对)
     S.line("  配对 Wilcoxon signed-rank(加密 - 明文 latency_per_pub):")
     if len(plat) == len(elat) and len(plat) > 0:
         w, p, n, z = wilcoxon_signed_rank(elat, plat)
@@ -321,7 +167,6 @@ def plain_encrypted(S, d):
         S.texcmd("latencyMedianDiff", f(med_diff, 2))
         S.texcmd("latencyPlain", f(np.median(plat), 2))
         S.texcmd("latencyEncrypted", f(np.median(elat), 2))
-        # 加密观测性
         st = last_broker_stats(os.path.join(d, "encrypted.log"))
         S.line(f"    STATS(encrypted): match_calls={st.get('match_calls', 0)} "
                f"he_mode={st.get('he_mode', 0)} sub_groups={st.get('sub_groups', 0)}")
@@ -344,7 +189,6 @@ def dynamics(S, d):
     if closer:
         conv = sum(1 for r in closer if r['converged'] == '1')
         rate = conv / len(closer)
-        # trial 级收敛时间
         by = {}
         for r in closer:
             if r['converged'] == '1':
@@ -377,7 +221,7 @@ def crypto(S, d):
         if not os.path.exists(p):
             continue
         for line in open(p):
-            m = re.match(r'(\w+): ([\d.eE+-]+) ms/op', line)
+            m = __import__('re').match(r'(\w+): ([\d.eE+-]+) ms/op', line)
             if m:
                 vals.setdefault(m.group(1), []).append(float(m.group(2)))
     for k in ['blindNotification', 'blindSubscription', 'executeMatch']:
@@ -385,11 +229,10 @@ def crypto(S, d):
             med = np.median(vals[k])
             S.line(f"  {k}: {med:.4f} ms/op (runs: {[f'{v:.3f}' for v in vals[k]]})")
             S.texcmd("crypto" + k + "Ms", f(med, 3))
-    # keygen n_bits
     p = os.path.join(d, "keygen_nbits.txt")
     if os.path.exists(p):
         txt = open(p).read()
-        m = re.search(r'summary: (\d+)/(\d+) at exactly 2048 bits', txt)
+        m = __import__('re').search(r'summary: (\d+)/(\d+) at exactly 2048 bits', txt)
         if m:
             S.line(f"  keygen n_bits: {m.group(1)}/{m.group(2)} at exactly 2048 bits")
             S.texcmd("keygen2048Count", m.group(1))
@@ -399,7 +242,7 @@ def main():
     d = sys.argv[1] if len(sys.argv) > 1 else 'results/final'
     S = Summary()
     S.line(f"DNS++ 正式实验结果汇总 (results dir: {d})")
-    S.line(f"bootstrap: {N_BOOT} resamples, 95% percentile CI; RNG seed fixed")
+    S.line("bootstrap: 10000 resamples, 95% percentile CI; stable per-value seed")
     S.line("")
 
     single_brake(S, d, 'singleBrake')

@@ -316,6 +316,98 @@ def fig_dynamics_cdf(d, outdir):
     print('fig_dynamics_cdf.png')
 
 
+def _udp_delta(log_path):
+    import re
+    with open(log_path, errors='replace') as f:
+        for line in f:
+            m = re.search(r'udp_rcvbuf_errors_delta=(\d+)', line)
+            if m:
+                return int(m.group(1))
+    return 0
+
+
+def fig_udp_loss(d, outdir):
+    configs = [(10, '10'), (50, '50'), (200, '200'), (500, '500'), (1000, '1000')]
+    labels, rcvbuf, rec = [], [], []
+    for N, lab in configs:
+        p = os.path.join(d, f'sweep_{N}.csv')
+        if not os.path.exists(p):
+            continue
+        rows = load_rows(p)
+        r = trial_level(rows, m_recall)
+        if not r:
+            continue
+        labels.append(lab)
+        rec.append(r)
+        rcvbuf.append(_udp_delta(os.path.join(d, f'sweep_{N}.log')))
+    if not rec:
+        return
+    x = np.arange(len(rec))
+    fig, ax1 = plt.subplots(figsize=(6, 3.8))
+    ax1.bar(x, rcvbuf, color=C['red'], alpha=0.45, width=0.5, label='UDP RcvbufErrors')
+    ax1.set_ylabel('RcvbufErrors', color=C['red'])
+    ax1.tick_params(axis='y', labelcolor=C['red'])
+    ax2 = ax1.twinx()
+    means = [np.mean(v) for v in rec]
+    los, his = [], []
+    for v in rec:
+        lo, hi = boot_ci(v); los.append(lo); his.append(hi)
+    yerr = [[m - lo for m, lo in zip(means, los)], [hi - m for m, hi in zip(means, his)]]
+    ax2.errorbar(x, means, yerr=yerr, marker='o', color=C['green'],
+                 capsize=4, capthick=1.2, label='recall (95% CI)')
+    ax2.set_ylabel('Recall', color=C['green'])
+    ax2.tick_params(axis='y', labelcolor=C['green'])
+    ax2.set_ylim(0, 1.05)
+    ax1.set_xticks(x); ax1.set_xticklabels(labels)
+    ax1.set_xlabel('subscribers')
+    ax1.set_title('UDP loss vs recall (subscriber scale)')
+    l1, lab1 = ax1.get_legend_handles_labels()
+    l2, lab2 = ax2.get_legend_handles_labels()
+    ax1.legend(l1 + l2, lab1 + lab2, loc='center right', fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_udp_loss.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_udp_loss.png')
+
+
+def fig_crypto_breakdown(d, outdir):
+    import re
+    vals = {}
+    for i in [1, 2, 3]:
+        p = os.path.join(d, f'microbench_run{i}.txt')
+        if not os.path.exists(p):
+            continue
+        for line in open(p):
+            m = re.match(r'(\w+): ([\d.eE+-]+) ms/op', line)
+            if m:
+                vals.setdefault(m.group(1), []).append(float(m.group(2)))
+    names = ['blindNotification', 'blindSubscription', 'executeMatch']
+    labels = ['blindNotification\n(Publisher)', 'blindSubscription\n(Subscriber)',
+              'executeMatch\n(Broker)']
+    meds = []
+    for k in names:
+        if k in vals:
+            meds.append(float(np.median(vals[k])))
+    if not meds:
+        print('fig_crypto_breakdown.png: SKIP (no microbench data)')
+        return
+    fig, ax = plt.subplots(figsize=(6, 3.8))
+    x = np.arange(len(meds))
+    bars = ax.bar(x, meds, color=[C['orange'], C['purple'], C['green']],
+                  edgecolor='black', width=0.5)
+    ax.set_yscale('log')
+    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.set_ylabel('time (ms/op, log scale)')
+    ax.set_title('Cryptographic cost breakdown (median of 3 runs)')
+    for bar, v in zip(bars, meds):
+        ax.text(bar.get_x() + bar.get_width() / 2, v * 1.15, f'{v:.3f}',
+                ha='center', va='bottom', fontsize=9)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'fig_crypto_breakdown.png'), bbox_inches='tight')
+    plt.close(fig)
+    print('fig_crypto_breakdown.png')
+
+
 def main():
     d = sys.argv[1] if len(sys.argv) > 1 else 'results/final'
     outdir = os.path.join(d, 'figures')
@@ -326,6 +418,8 @@ def main():
     fig_stretch_cdf(d, outdir)
     fig_crypto(d, outdir)
     fig_dynamics_cdf(d, outdir)
+    fig_udp_loss(d, outdir)
+    fig_crypto_breakdown(d, outdir)
     print(f'figures written to {outdir}/')
 
 
